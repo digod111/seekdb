@@ -41,6 +41,7 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
+#include "share/file_sql/ob_file_scan_utils.h"
 
 namespace oceanbase
 {
@@ -2701,6 +2702,10 @@ int ObDMLResolver::resolve_table(const ParseNode &parse_tree,
         OZ (resolve_function_table_item(*table_node, table_item));
         break;
       }
+      case T_FILE_TABLE_FUNC: {
+        OZ (resolve_file_table_item(*table_node, table_item));
+        break;
+      }
       case T_JSON_TABLE_EXPRESSION: {
         OZ (resolve_json_table_item(*table_node, table_item));
         break;
@@ -4027,6 +4032,181 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
     ObSEArray<ColumnItem, 16> col_items;
     CK (OB_NOT_NULL(item));
     OZ (resolve_function_table_column_item(*item, col_items));
+  }
+  OX (tbl_item = item);
+  return ret;
+}
+
+int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
+                                           TableItem *&tbl_item)
+{
+  int ret = OB_SUCCESS;
+  ObDMLStmt *stmt = get_stmt();
+  TableItem *item = NULL;
+  tbl_item = NULL;
+  // children: [0] func name, [1] path, [2] named args (may be NULL), [3] alias
+  CK (OB_LIKELY(T_FILE_TABLE_FUNC == parse_tree.type_));
+  CK (OB_LIKELY(4 == parse_tree.num_child_));
+  CK (OB_NOT_NULL(stmt));
+  CK (OB_NOT_NULL(session_info_));
+  CK (OB_NOT_NULL(allocator_));
+  CK (OB_NOT_NULL(parse_tree.children_[0]));
+  CK (OB_NOT_NULL(parse_tree.children_[1]));
+
+  int64_t enable_file_sql = 0;
+  ObFileTableParam param;
+  ObSEArray<ObFileTableCol, 16> cols;
+  const ParseNode *name_node = parse_tree.children_[0];
+  const ParseNode *path_node = parse_tree.children_[1];
+  const ParseNode *alias_node = parse_tree.children_[3];
+  ObString alias_name;
+  ObString func_name(name_node->str_len_, name_node->str_value_);
+  ObString path(path_node->str_len_, path_node->str_value_);
+  if (OB_FAIL(session_info_->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enable_file_sql))) {
+    LOG_WARN("fail to get enable_file_sql", K(ret));
+  } else if (enable_file_sql <= 0) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file sql is disabled, set enable_file_sql to enable it");
+  } else if (func_name.case_compare("read_csv") == 0) {
+    param.kind_ = FT_READ_CSV;
+  } else if (func_name.case_compare("read_json") == 0) {
+    param.kind_ = FT_READ_JSON;
+  } else if (func_name.case_compare("read_ndjson") == 0) {
+    param.kind_ = FT_READ_NDJSON;
+  } else if (func_name.case_compare("read_parquet") == 0) {
+    param.kind_ = FT_READ_PARQUET;
+  } else if (func_name.case_compare("glob") == 0) {
+    param.kind_ = FT_GLOB;
+  } else {
+    ret = OB_ERR_SP_DOES_NOT_EXIST;
+    LOG_USER_ERROR(OB_ERR_SP_DOES_NOT_EXIST, "FUNCTION", func_name.length(), func_name.ptr());
+  }
+
+  // named args
+  if (OB_FAIL(ret)) {
+    // nothing
+  } else {
+    const ParseNode *arg = parse_tree.children_[2];
+    while (OB_SUCC(ret) && OB_NOT_NULL(arg)) {
+      CK (OB_LIKELY(T_LINK_NODE == arg->type_ || T_FILE_TABLE_ARG == arg->type_));
+      const ParseNode *cur = (T_LINK_NODE == arg->type_) ? arg->children_[0] : arg;
+      CK (OB_NOT_NULL(cur));
+      CK (OB_LIKELY(T_FILE_TABLE_ARG == cur->type_ && 2 == cur->num_child_));
+      const ParseNode *key = cur->children_[0];
+      const ParseNode *val = cur->children_[1];
+      CK (OB_NOT_NULL(key));
+      ObString key_name(key->str_len_, key->str_value_);
+      if (0 == key_name.case_compare("header")) {
+        CK (OB_NOT_NULL(val));
+        param.header_ = (val->value_ != 0);
+      } else if (0 == key_name.case_compare("format")) {
+        CK (OB_NOT_NULL(val));
+        ObString fmt(val->str_len_, val->str_value_);
+        if (0 != fmt.case_compare("newline_delimited") && 0 != fmt.case_compare("csv")
+            && 0 != fmt.case_compare("parquet")) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, fmt.length(), fmt.ptr());
+        }
+      } else if (0 == key_name.case_compare("sample_size")) {
+        CK (OB_NOT_NULL(val));
+        if (-1 != val->value_) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "sample_size other than -1 (full scan)");
+        }
+      } else if (0 == key_name.case_compare("delimiter")) {
+        CK (OB_NOT_NULL(val));
+        param.delimiter_ = (val->str_len_ > 0) ? val->str_value_[0] : ',';
+      } else if (0 == key_name.case_compare("quote")) {
+        CK (OB_NOT_NULL(val));
+        param.quote_ = (val->str_len_ > 0) ? val->str_value_[0] : '\"';
+      } else if (0 == key_name.case_compare("escape")) {
+        CK (OB_NOT_NULL(val));
+        param.escape_ = (val->str_len_ > 0) ? val->str_value_[0] : '\"';
+      } else {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT, key_name.length(), key_name.ptr());
+      }
+      arg = (T_LINK_NODE == arg->type_) ? arg->children_[1] : NULL;
+    }
+  }
+
+  // secure_file_priv check
+  if (OB_FAIL(ret)) {
+    // nothing
+  } else {
+    ObString secure_priv;
+    bool allowed = false;
+    if (OB_FAIL(session_info_->get_sys_variable(share::SYS_VAR_SECURE_FILE_PRIV, secure_priv))) {
+      LOG_WARN("fail to get secure_file_priv", K(ret));
+    } else if (OB_FAIL(file_sql::check_file_path_allowed(secure_priv, path, allowed))) {
+      LOG_WARN("fail to check file path", K(ret));
+    } else if (!allowed) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "path outside of secure_file_priv");
+    }
+  }
+
+  // infer schema (reads the file)
+  if (OB_SUCC(ret)) {
+    param.path_ = path;
+    if (OB_FAIL(file_sql::infer_file_schema(param, *allocator_, cols))) {
+      LOG_WARN("fail to infer file schema", K(ret), K(path));
+    }
+  }
+
+  // create the table item
+  if (OB_FAIL(ret)) {
+    // nothing
+  } else if (OB_ISNULL(item = stmt->create_table_item(*allocator_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_ERROR("create table item failed");
+  } else if (NULL != alias_node) {
+    alias_name.assign_ptr((char *)(alias_node->str_value_),
+                          static_cast<int32_t>(alias_node->str_len_));
+  } else if (OB_FAIL(stmt->generate_func_table_name(*allocator_, alias_name))) {
+    LOG_WARN("fail to generate function table name", K(ret));
+  }
+  if (OB_SUCC(ret)) {
+    OX (item->table_name_ = alias_name);
+    OX (item->alias_name_ = alias_name);
+    OX (item->table_id_ = generate_table_id());
+    OX (item->type_ = TableItem::FUNCTION_TABLE);
+    // the function_table_expr_ is a self-describing constant marker string;
+    // the physical operator decodes it and drives the file scan
+    char marker_buf[common::OB_MAX_FILE_NAME_LENGTH + 128];
+    int64_t marker_len = 0;
+    ObRawExpr *marker_expr = NULL;
+    ObString marker_str;
+    if (OB_FAIL(file_sql::encode_file_table_param(param, marker_buf,
+                                                  static_cast<int64_t>(sizeof(marker_buf)),
+                                                  marker_len))) {
+      LOG_WARN("fail to encode file table param", K(ret));
+    } else if (OB_FAIL(ob_write_string(*allocator_,
+                                       ObString(static_cast<int32_t>(marker_len), marker_buf),
+                                       marker_str))) {
+      LOG_WARN("fail to copy file table marker", K(ret));
+    } else if (OB_FAIL(ObRawExprUtils::build_const_string_expr(
+                          *params_.expr_factory_,
+                          common::ObVarcharType,
+                          marker_str,
+                          CS_TYPE_UTF8MB4_GENERAL_CI,
+                          marker_expr))) {
+      LOG_WARN("fail to build file table marker expr", K(ret));
+    } else {
+      OX (item->function_table_expr_ = marker_expr);
+      OZ (stmt->add_table_item(session_info_, item));
+      // create a column item for every inferred column so that the compiled
+      // spec's column_exprs_ line up positionally with the scan output
+      for (int64_t i = 0; OB_SUCC(ret) && i < cols.count(); ++i) {
+        ObFileTableCol &c = cols.at(i);
+        ColumnItem *col_item = NULL;
+        if (OB_FAIL(resolve_function_table_column_item(
+                *item, c.meta_, c.accuracy_, c.name_,
+                common::OB_APP_MIN_COLUMN_ID + i, col_item))) {
+          LOG_WARN("fail to resolve file table column item", K(ret));
+        }
+      }
+    }
   }
   OX (tbl_item = item);
   return ret;

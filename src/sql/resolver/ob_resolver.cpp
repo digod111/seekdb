@@ -93,6 +93,10 @@
 #include "sql/resolver/expr/ob_raw_expr_wrap_enum_set.h"
 #include "sql/resolver/cmd/ob_get_diagnostics_resolver.h"
 #include "sql/resolver/dcl/ob_alter_role_resolver.h"
+#include "sql/resolver/dml/ob_select_resolver.h"
+#include "sql/resolver/dml/ob_select_stmt.h"
+#include "share/system_variable/ob_sys_var_class_type.h"
+#include "share/file_sql/ob_file_scan_utils.h"
 #include "sql/pl/ob_pl_package.h"
 
 namespace oceanbase
@@ -136,6 +140,128 @@ int ObResolver::select_stmt_resolver_func(ObResolverParams &params, const ParseN
   }
   return ret;
 }
+
+// COPY (select ...) TO 'file' (format csv, header, nullstr 'NULL'):
+// parse the option list and fill the select-into item
+static int resolve_copy_file_options(const ParseNode *opt_node, ObResolverParams &params,
+                                     ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  const ObCollationType sys_cs = ObCharset::get_system_collation();
+  for (const ParseNode *link = opt_node; OB_SUCC(ret) && NULL != link; link = link->children_[1]) {
+    const ParseNode *opt = link->children_[0];
+    if (OB_ISNULL(opt) || opt->num_child_ != 2 || OB_ISNULL(opt->children_[0])) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("invalid copy option node", K(ret));
+    } else {
+      ObString opt_name(opt->children_[0]->str_len_, opt->children_[0]->str_value_);
+      const ParseNode *val_node = opt->children_[1];
+      if (0 == opt_name.case_compare("format")) {
+        if (OB_ISNULL(val_node)) {
+          ret = OB_ERR_PARSE_SYNTAX;
+        } else {
+          ObString fmt(val_node->str_len_, val_node->str_value_);
+          if (0 != fmt.case_compare("csv")) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "this format type");
+          }
+        }
+      } else if (0 == opt_name.case_compare("header")) {
+        into_item.write_header_ = (NULL == val_node) ? true : (0 != val_node->value_);
+      } else if (0 == opt_name.case_compare("nullstr")) {
+        if (OB_ISNULL(val_node)) {
+          ret = OB_ERR_PARSE_SYNTAX;
+        } else {
+          ObString nv(val_node->str_len_, val_node->str_value_);
+          if (OB_FAIL(ob_write_string(*params.allocator_, nv, into_item.null_str_, true))) {
+            LOG_WARN("fail to copy nullstr", K(ret));
+          }
+        }
+      } else if (0 == opt_name.case_compare("delimiter")) {
+        if (OB_ISNULL(val_node)) {
+          ret = OB_ERR_PARSE_SYNTAX;
+        } else {
+          into_item.field_str_.set_varchar(ObString(val_node->str_len_, val_node->str_value_));
+          into_item.field_str_.set_collation_type(sys_cs);
+        }
+      } else {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "this copy option");
+      }
+    }
+  }
+  return ret;
+}
+
+// COPY (select ...) TO 'file' (...) -> rewrite as SELECT ... INTO OUTFILE
+static int resolve_copy_file_into(ObResolverParams &params, const ParseNode &parse_tree, ObStmt &stmt)
+{
+  int ret = OB_SUCCESS;
+  int64_t enable_file_sql = 0;
+  ObSQLSessionInfo *session = params.session_info_;
+  ObSelectStmt *select_stmt = static_cast<ObSelectStmt *>(&stmt);
+  ObSelectIntoItem *into_item = NULL;
+  const ParseNode *path_node = parse_tree.children_[1];
+  const ParseNode *opt_node = parse_tree.children_[2];
+  ObString path(path_node->str_len_, path_node->str_value_);
+  if (OB_ISNULL(session) || OB_ISNULL(params.allocator_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(session->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enable_file_sql))) {
+    LOG_WARN("fail to get enable_file_sql", K(ret));
+  } else if (enable_file_sql <= 0) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file sql is disabled, set enable_file_sql to enable it");
+  }
+  // secure_file_priv check
+  if (OB_FAIL(ret)) {
+    // nothing
+  } else {
+    ObString secure_priv;
+    bool allowed = false;
+    if (OB_FAIL(session->get_sys_variable(share::SYS_VAR_SECURE_FILE_PRIV, secure_priv))) {
+      LOG_WARN("fail to get secure_file_priv", K(ret));
+    } else if (OB_FAIL(file_sql::check_file_path_allowed(secure_priv, path, allowed))) {
+      LOG_WARN("fail to check file path", K(ret));
+    } else if (!allowed) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "path outside of secure_file_priv");
+    }
+  }
+  if (OB_FAIL(ret)) {
+    // nothing
+  } else if (OB_ISNULL(into_item = static_cast<ObSelectIntoItem *>(
+               params.allocator_->alloc(sizeof(ObSelectIntoItem))))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    new (into_item) ObSelectIntoItem();
+    into_item->into_type_ = T_INTO_OUTFILE;
+    into_item->outfile_name_.set_varchar(path);
+    into_item->outfile_name_.set_collation_type(ObCharset::get_system_collation());
+    // DuckDB COPY TO defaults: comma separated, newline terminated
+    into_item->field_str_.set_varchar(",");
+    into_item->field_str_.set_collation_type(ObCharset::get_system_collation());
+    into_item->line_str_.set_varchar("\n");
+    into_item->line_str_.set_collation_type(ObCharset::get_system_collation());
+    // column names for the header line
+    for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_select_item_size(); ++i) {
+      const SelectItem &item = select_stmt->get_select_item(i);
+      ObString name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+      if (OB_FAIL(into_item->column_names_.push_back(name))) {
+        LOG_WARN("fail to push column name", K(ret));
+      }
+    }
+    if (OB_FAIL(ret)) {
+      // nothing
+    } else if (OB_FAIL(resolve_copy_file_options(opt_node, params, *into_item))) {
+      LOG_WARN("fail to resolve copy options", K(ret));
+    }
+    if (OB_SUCC(ret)) {
+      select_stmt->set_select_into(into_item);
+    }
+  }
+  return ret;
+}
+
 
 int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObStmt *&stmt)
 {
@@ -236,6 +362,14 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
       }
       case T_SELECT: {
         REGISTER_SELECT_STMT_RESOLVER(Select);
+        break;
+      }
+      case T_COPY_FILE_STMT: {
+        // rewrite COPY (select ...) TO 'file' (...) as SELECT ... INTO OUTFILE
+        if (OB_FAIL(select_stmt_resolver_func<ObSelectResolver>(
+                params_, *parse_tree.children_[0], stmt))) {
+        } else if (OB_FAIL(resolve_copy_file_into(params_, parse_tree, *stmt))) {
+        }
         break;
       }
       case T_INSERT: {

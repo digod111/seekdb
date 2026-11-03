@@ -237,6 +237,16 @@ SHARE_UNITY_GROUPS = [
         external_srcs = [],
     ),
     struct(
+        name = "ob_share_file_sql_0",
+        language = "c++",
+        srcs = [
+            "src/share/file_sql/ob_file_scan_core.cpp",
+            "src/share/file_sql/ob_file_scan_utils.cpp",
+        ],
+        generated_srcs = [],
+        external_srcs = [],
+    ),
+    struct(
         name = "ob_share_geo_0",
         language = "c++",
         srcs = [

@@ -62,6 +62,7 @@ _SQL_RUNTIME_COMMON_SHARE_DEPS = [
     '//src/share:error_codes',
     '//src/share:est_row_count_record',
     '//src/share:execution_contracts',
+    '//src/share:file_sql',
     '//src/share:geo_cast_interface',
     '//src/share:geo_types',
     '//src/share:interrupt_runtime',

@@ -1144,6 +1144,28 @@ seekdb_semantic_unity_cc_library(
     ],
 )
 
+_FILE_SQL_UNITY_GROUP = share_select_unity_groups(
+    SHARE_UNITY_GROUPS,
+    ["ob_share_file_sql_0"],
+)
+
+seekdb_semantic_unity_cc_library(
+    name = "file_sql",
+    owner_package = "src/share",
+    unity_groups = _FILE_SQL_UNITY_GROUP,
+    public_hdrs = [
+        "file_sql/ob_file_scan_core.h",
+        "file_sql/ob_file_scan_utils.h",
+    ],
+    deps = ["//src/oblib:oblib_foundation"],
+    features = ["layering_check"],
+    tags = ["manual"],
+    visibility = [
+        "//src:__subpackages__",
+        "//unittest:__subpackages__",
+    ],
+)
+
 _OBJECT_CAST_UNITY_GROUP = share_select_unity_sources(
     SHARE_UNITY_GROUPS,
     "object_cast",
@@ -1553,7 +1575,7 @@ _SHARE_NATIVE_UNITY_SOURCES = share_unity_group_sources(
     _SEMISTRUCT_UNITY_GROUP,
     _LOB_RUNTIME_UNITY_GROUP,
     _DATUM_CMP_UNITY_GROUP,
-    ],
+    ] + _FILE_SQL_UNITY_GROUP,
 )
 
 _SHARE_RUNTIME_DEPS = [
@@ -1572,6 +1594,7 @@ _SHARE_RUNTIME_DEPS = [
     ":device_manager_interface",
     ":errsim_interface",
     ":est_row_count_record",
+    ":file_sql",
     ":geo_cast_interface",
     ":geo_types",
     ":id_generator",

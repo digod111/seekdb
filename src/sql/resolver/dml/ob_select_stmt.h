@@ -128,6 +128,9 @@ struct ObSelectIntoItem
         max_file_size_(DEFAULT_MAX_FILE_SIZE),
         escaped_cht_(),
         buffer_size_(DEFAULT_BUFFER_SIZE),
+        write_header_(false),
+        column_names_(),
+        null_str_(),
         external_properties_()
   {
     field_str_.set_varchar(DEFAULT_FIELD_TERM_STR);
@@ -154,7 +157,11 @@ struct ObSelectIntoItem
     escaped_cht_ = other.escaped_cht_;
     cs_type_ = other.cs_type_;
     buffer_size_ = other.buffer_size_;
+    write_header_ = other.write_header_;
+    null_str_ = other.null_str_;
     external_properties_ = other.external_properties_;
+    int tmp_ret = column_names_.assign(other.column_names_);
+    UNUSED(tmp_ret);
     return user_vars_.assign(other.user_vars_);
   }
   int deep_copy(ObIAllocator &allocator,
@@ -180,6 +187,9 @@ struct ObSelectIntoItem
   common::ObSEArray<sql::ObRawExpr*, 16> pl_vars_; // pl variables
   common::ObObj closed_cht_; // all fields, "123","ab"
   bool is_optional_; //  for string, closed character, such as "aa"
+  bool write_header_; // COPY (select ...) TO ... (format csv, header)
+  common::ObSEArray<common::ObString, 8> column_names_; // column names for header line
+  common::ObString null_str_; // COPY ... (nullstr 'NULL'): print this for NULL
   bool is_single_;
   int64_t max_file_size_;
   common::ObObj escaped_cht_;

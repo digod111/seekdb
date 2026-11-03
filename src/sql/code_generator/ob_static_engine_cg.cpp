@@ -18,6 +18,7 @@
 
 #include "config_bridge.h"
 #include "ob_static_engine_cg.h"
+#include "share/file_sql/ob_file_scan_utils.h"
 #include "sql/optimizer/ob_log_group_by.h"
 #include "sql/optimizer/ob_log_sort.h"
 #include "sql/optimizer/ob_log_limit.h"
@@ -5486,7 +5487,22 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
       spec.cs_type_ = op.get_cs_type();
       spec.parallel_ = op.get_parallel();
       spec.is_overwrite_ = op.get_is_overwrite();
+      spec.write_header_ = op.get_write_header();
       spec.plan_->need_drive_dml_query_ = true;
+    }
+  }
+  if (OB_SUCC(ret) && op.get_write_header()) {
+    // copy column names and nullstr to the physical spec for header line output
+    spec.column_names_.reset();
+    for (int64_t i = 0; OB_SUCC(ret) && i < op.get_column_names().count(); ++i) {
+      ObString name;
+      if (OB_FAIL(ob_write_string(alloc, op.get_column_names().at(i), name))) {
+      } else if (OB_FAIL(spec.column_names_.push_back(name))) {
+      }
+    }
+    if (OB_SUCC(ret) && !op.get_null_str().empty()) {
+      if (OB_FAIL(ob_write_string(alloc, op.get_null_str(), spec.null_str_, true))) {
+      }
     }
   }
   return ret;
@@ -5511,6 +5527,16 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
   } else {
     spec.has_correlated_expr_ = value_raw_expr->has_flag(CNT_DYNAMIC_PARAM);
     spec.value_expr_ = value_expr;
+    if (value_raw_expr->is_const_raw_expr()) {
+      // file table marker: schema depends on external file content,
+      // the plan must never be cached
+      ObConstRawExpr *const_expr = static_cast<ObConstRawExpr *>(value_raw_expr);
+      if (ObVarcharType == const_expr->get_value().get_type()
+          && file_sql::is_file_table_marker(const_expr->get_value().get_varchar().ptr(),
+                                            const_expr->get_value().get_varchar().length())) {
+        phy_plan_->get_phy_plan_hint().plan_cache_policy_ = OB_USE_PLAN_CACHE_NONE;
+      }
+    }
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
       }

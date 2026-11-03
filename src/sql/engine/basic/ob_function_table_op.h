@@ -27,6 +27,10 @@ namespace sql
 {
 
 class ObExpr;
+namespace file_sql
+{
+struct ObFileScanState;
+}
 class ObFunctionTableSpec : public ObOpSpec
 {
 OB_UNIS_VERSION_V(1);
@@ -48,7 +52,8 @@ public:
     already_calc_(false),
     row_count_(0),
     col_count_(0),
-    value_table_(NULL) 
+    value_table_(NULL),
+    fs_state_(NULL)
   {}
 
   virtual int inner_open() override;
@@ -60,6 +65,14 @@ public:
 private:
   int inner_get_next_row_udf();
   int inner_get_next_row_sys_func();
+  int inner_get_next_row_file();
+  int open_file_scan(const common::ObString &marker);
+  void close_file_scan();
+  int next_file_row_csv(common::ObObj *objs);
+  int next_file_row_json(common::ObObj *objs);
+  int next_file_row_parquet(common::ObObj *objs);
+  int next_file_row_glob(common::ObObj *objs);
+  int fill_file_row(common::ObObj *objs, const int64_t ncol);
   int get_current_result(common::ObObj &result);
   int64_t node_idx_;
   bool already_calc_;
@@ -68,6 +81,8 @@ private:
   common::ObObj value_;
   pl::ObPLCollection *value_table_;
   int (ObFunctionTableOp::*next_row_func_)();
+  // file-as-database scan state (read_csv/read_json/read_ndjson/read_parquet/glob)
+  file_sql::ObFileScanState *fs_state_;
 };
 
 } // end namespace sql

@@ -416,6 +416,8 @@ END_P SET_VAR DELIMITER
 %type <node> qb_name_option qb_name_string qb_name_list multi_qb_name_list
 %type <node> coalesce_strategy_list
 %type <node> join_condition inner_join_type except_full_outer_join_type opt_outer natural_join_type opt_full_table_factor
+%type <node> file_table_function file_table_opt_args file_table_arg_list file_table_arg file_table_value
+%type <node> copy_file_stmt opt_copy_file_options copy_file_option_list copy_file_option copy_file_option_value
 %type <ival> string_length_i opt_string_length_i opt_string_length_i_v2 opt_int_length_i opt_bit_length_i opt_datetime_fsp_i opt_unsigned_i opt_zerofill_i opt_year_i opt_time_func_fsp_i opt_cast_float_precision
 %type <node> opt_float_precision opt_number_precision
 %type <node> opt_equal_mark opt_default_mark read_only_or_write not not2
@@ -647,6 +649,7 @@ stmt:
   | purge_stmt              { $$ = $1; check_question_mark($$, result); }
   | analyze_stmt            { $$ = $1; check_question_mark($$, result); }
   | load_data_stmt          { $$ = $1; check_question_mark($$, result); }
+  | copy_file_stmt          { $$ = $1; question_mark_issue($$, result); }
   | optimize_stmt     { $$ = $1; check_question_mark($$, result); }
   | flush_privileges_stmt { $$ = $1; check_question_mark($$, result); }
   | dump_memory_stmt  { $$ = $1; check_question_mark($$, result); }
@@ -11258,6 +11261,90 @@ relation_factor %prec LOWER_PARENS
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $3, $6);
 }
+| file_table_function %prec LOWER_PARENS
+{
+  $$ = $1;
+}
+| file_table_function relation_name
+{
+  $$ = $1;
+  $$->children_[3] = $2;
+}
+| file_table_function AS relation_name
+{
+  $$ = $1;
+  $$->children_[3] = $3;
+}
+;
+
+file_table_function:
+NAME_OB '(' STRING_VALUE file_table_opt_args ')' %prec LOWER_PARENS
+{
+  /* file-as-database table function: read_csv/read_json/read_ndjson/
+   * read_parquet/glob. The real function name is validated by the resolver,
+   * so an unknown NAME_OB '(' string ... ')' in table position reports a
+   * proper semantic error instead of being parsed as something else.
+   * children: [0] function name, [1] path, [2] named args (T_LINK_NODE
+   * chain of T_FILE_TABLE_ARG, may be NULL), [3] alias (filled by
+   * table_factor, NULL here) */
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FUNC, 4, $1, $3, $4, NULL);
+}
+;
+
+file_table_opt_args:
+/* EMPTY */
+{
+  $$ = NULL;
+}
+| ',' file_table_arg_list
+{
+  $$ = $2;
+}
+;
+
+file_table_arg_list:
+file_table_arg
+{
+  $$ = $1;
+}
+| file_table_arg ',' file_table_arg_list
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+file_table_arg:
+NAME_OB '=' file_table_value
+{
+  /* named option, e.g. header = true, sample_size = -1,
+   * format = 'newline_delimited'. A bare value (like 'xml') is a syntax
+   * error on purpose (DuckDB-style validation, error 1064). */
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, $1, $3);
+}
+;
+
+file_table_value:
+STRING_VALUE
+{
+  $$ = $1;
+}
+| INTNUM
+{
+  $$ = $1;
+}
+| '-' INTNUM
+{
+  $$ = $2;
+  $$->value_ = -($$->value_);
+}
+| DECIMAL_VAL
+{
+  $$ = $1;
+}
+| BOOL_VALUE
+{
+  $$ = $1;
+}
 ;
 
 dml_table_name:
@@ -13848,6 +13935,80 @@ KILL QUERY expr
   malloc_terminal_node(opt_node, result->malloc_pool_, T_BOOL);
   opt_node->value_ = 1;
   malloc_non_terminal_node($$, result->malloc_pool_, T_KILL, 2, opt_node, $3);
+}
+;
+
+/*****************************************************************************
+ *
+ *	copy file grammar (file-as-database COPY TO)
+ *
+ *****************************************************************************/
+copy_file_stmt:
+COPY '(' select_stmt ')' TO STRING_VALUE opt_copy_file_options
+{
+  /* COPY (select ...) TO 'file' (format csv, header, nullstr 'NULL')
+   * children: [0] select stmt, [1] target path, [2] option list
+   * (T_LINK_NODE chain of T_COPY_FILE_OPTION, may be NULL) */
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_FILE_STMT, 3, $3, $6, $7);
+}
+;
+
+opt_copy_file_options:
+/* EMPTY */
+{
+  $$ = NULL;
+}
+| '(' copy_file_option_list ')'
+{
+  $$ = $2;
+}
+;
+
+copy_file_option_list:
+copy_file_option
+{
+  $$ = $1;
+}
+| copy_file_option ',' copy_file_option_list
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+copy_file_option:
+NAME_OB copy_file_option_value
+{
+  /* e.g. format csv, header, nullstr 'NULL'; a NULL value means a
+   * flag-only option */
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_FILE_OPTION, 2, $1, $2);
+}
+;
+
+copy_file_option_value:
+/* EMPTY */
+{
+  $$ = NULL;
+}
+| NAME_OB
+{
+  $$ = $1;
+}
+| STRING_VALUE
+{
+  $$ = $1;
+}
+| INTNUM
+{
+  $$ = $1;
+}
+| '-' INTNUM
+{
+  $$ = $2;
+  $$->value_ = -($$->value_);
+}
+| BOOL_VALUE
+{
+  $$ = $1;
 }
 ;
 

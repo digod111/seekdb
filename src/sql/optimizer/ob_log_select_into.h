@@ -44,6 +44,9 @@ public:
         escaped_cht_(),
         cs_type_(CS_TYPE_INVALID),
         is_overwrite_(false),
+        write_header_(false),
+        column_names_(),
+        null_str_(),
         external_properties_()
   {
   }
@@ -107,6 +110,34 @@ public:
   inline void set_external_properties(const common::ObString &external_properties)
   {
     external_properties_.assign_ptr(external_properties.ptr(), external_properties.length());
+  }
+  inline void set_write_header(bool write_header)
+  {
+    write_header_ = write_header;
+  }
+  inline void set_null_str(const common::ObString &null_str)
+  {
+    null_str_.assign_ptr(null_str.ptr(), null_str.length());
+  }
+  inline void set_column_names(const common::ObIArray<common::ObString> &column_names)
+  {
+    int ret = common::OB_SUCCESS;
+    for (int i = 0; common::OB_SUCC(ret) && i < column_names.count(); ++i) {
+      if (OB_FAIL(column_names_.push_back(column_names.at(i)))) {
+      }
+    }
+  }
+  inline bool get_write_header() const
+  {
+    return write_header_;
+  }
+  inline common::ObString get_null_str() const
+  {
+    return null_str_;
+  }
+  inline const common::ObIArray<common::ObString> &get_column_names() const
+  {
+    return column_names_;
   }
   inline ObItemType get_into_type() const
   {
@@ -187,6 +218,9 @@ private:
   common::ObObj escaped_cht_;
   common::ObCollationType cs_type_;
   bool is_overwrite_;
+  bool write_header_;
+  common::ObSEArray<common::ObString, 8, common::ModulePageAllocator, true> column_names_;
+  common::ObString null_str_;
   common::ObString external_properties_;
 };
 }
