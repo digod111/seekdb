@@ -64,8 +64,8 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
-      ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+      // json arguments are allowed, the value structure is kept in
+      // the prompt object
     } else {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
     }
@@ -78,7 +78,7 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
   return ret;
 }
 
-int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res) 
+int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
 {
   INIT_SUCC(ret);
   ObDatum *template_datum = NULL;
@@ -87,36 +87,43 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
   ObJsonArray *args_array = NULL;
   ObJsonObject *prompt_object = NULL;
   ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
-  
+
   MultimodeAlloctor tmp_allocator(tmp_alloc_g.get_allocator());
   lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr(N_AI_PROMPT));
 
   if (OB_FAIL(tmp_allocator.eval_arg(arg0, ctx, template_datum))) {
   } else if (template_datum->is_null()) {
     ret = OB_INVALID_ARGUMENT;
-  } else {
-    template_str = template_datum->get_string();
+  } else if (OB_FAIL(ObTextStringHelper::get_string(ctx.exec_ctx_, expr, tmp_allocator, 0, template_datum, template_str))) {
+    // the template can be a text/lob value, read the real string data
   }
 
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(tmp_allocator, args_array))) {
   } else {
     for (int64_t i = 1; i < expr.arg_cnt_ && OB_SUCC(ret); i++) {
-      ObDatum *datum = NULL;
       ObExpr *arg = expr.args_[i];
-      ObString arg_str;
-      ObJsonString *arg_json_str = NULL;
-      if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
-      } else if (ob_is_string_tc(arg->datum_meta_.type_)) {
-        arg_str = datum->get_string();
-        if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
+      if (ob_is_json(arg->datum_meta_.type_)) {
+        // json arguments keep their json structure
+        ObIJsonBase *arg_json = NULL;
+        bool is_null = false;
+        if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator, i, arg_json, is_null))) {
+        } else if (is_null || OB_ISNULL(arg_json)) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(arg_json)))) {
+        }
+      } else {
+        ObDatum *datum = NULL;
+        ObString arg_str;
+        ObJsonString *arg_json_str = NULL;
+        if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
+        } else if (datum->is_null()) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (OB_FAIL(ObTextStringHelper::get_string(ctx.exec_ctx_, expr, tmp_allocator, i, datum, arg_str))) {
+          // the argument can be a text/lob value, read the real string data
+        } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
-      } else if (ob_is_json(arg->datum_meta_.type_)) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
-      } else if (datum->is_null()) {
-        ret = OB_ERR_INVALID_TYPE_FOR_OP;
       }
     }
   }
