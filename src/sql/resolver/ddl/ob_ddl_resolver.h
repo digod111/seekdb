@@ -59,7 +59,9 @@ enum NUMCHILD {
   COLUMN_DEFINITION_NUM_CHILD = 4,
   COLUMN_DEF_NUM_CHILD = 3,
   INDEX_NUM_CHILD = 5,
-  GEN_COLUMN_DEFINITION_NUM_CHILD = 7
+  GEN_COLUMN_DEFINITION_NUM_CHILD = 7,
+  // col_name type AI COLUMN (ai_func(...)) WITH (...) [position]
+  AI_COLUMN_DEFINITION_NUM_CHILD = 5
 };
 
 struct ObColumnResolveStat
@@ -518,6 +520,17 @@ protected:
       const bool unused_flag = false,
       const bool is_create_table_as = false,
       const bool allow_has_default = true);
+  // AI COLUMN support: validate `col type AI COLUMN (ai_func(...)) WITH (...)`
+  // and fill the AI meta of the column schema.
+  int resolve_ai_column_definition(share::schema::ObColumnSchemaV2 &column,
+                                   ParseNode *ai_node,
+                                   const ObTableSchema &table_schema);
+  // Build the hidden status column that tracks the state of an AI column.
+  // The name is `__ai_status_<column_name>` (truncated to fit the name limit).
+  static int build_ai_status_column(const share::schema::ObColumnSchemaV2 &ai_column,
+                                    const uint64_t status_column_id,
+                                    share::schema::ObColumnSchemaV2 &status_column);
+  static bool is_ai_status_column_name(const common::ObString &column_name);
   int drop_not_null_constraint(const share::schema::ObColumnSchemaV2 &column);
   int resolve_normal_column_attribute_constr_not_null(ObColumnSchemaV2 &column,
                                                       ParseNode *attrs_node,

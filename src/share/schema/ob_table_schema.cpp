@@ -2352,6 +2352,59 @@ const ObColumnSchemaV2 *ObTableSchema::get_column_schema(const ObString &column_
   return get_column_schema_by_name_internal(column_name);
 }
 
+int ObTableSchema::get_ai_status_column_name(const ObColumnSchemaV2 &ai_column,
+                                             ObString &name,
+                                             char *buf,
+                                             const int64_t buf_len) const
+{
+  int ret = OB_SUCCESS;
+  const char *prefix = "__ai_status_";
+  const int64_t prefix_len = static_cast<int64_t>(strlen(prefix));
+  const ObString &ai_column_name = ai_column.get_column_name_str();
+  int64_t total = prefix_len + ai_column_name.length();
+  if (OB_ISNULL(buf) || buf_len <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    // keep the same rule as ObDDLResolver::build_ai_status_column
+    if (total > OB_MAX_COLUMN_NAME_LENGTH) {
+      total = OB_MAX_COLUMN_NAME_LENGTH;
+    }
+    if (total + 1 > buf_len) {
+      ret = OB_BUF_NOT_ENOUGH;
+    } else {
+      MEMCPY(buf, prefix, prefix_len);
+      const int64_t copy_len = total - prefix_len;
+      if (copy_len > 0) {
+        MEMCPY(buf + prefix_len, ai_column_name.ptr(), copy_len);
+      }
+      buf[total] = '\0';
+      name.assign_ptr(buf, static_cast<ObString::obstr_size_t>(total));
+    }
+  }
+  return ret;
+}
+
+const ObColumnSchemaV2 *ObTableSchema::get_ai_status_column(const ObColumnSchemaV2 &ai_column) const
+{
+  const ObColumnSchemaV2 *status_column = NULL;
+  if (ai_column.is_ai_column()) {
+    if (OB_INVALID_ID != ai_column.get_ai_status_column_id()) {
+      status_column = get_column_schema(ai_column.get_ai_status_column_id());
+    }
+    if (NULL == status_column) {
+      char name_buf[OB_MAX_COLUMN_NAME_BUF_LENGTH];
+      ObString status_column_name;
+      if (OB_SUCCESS == get_ai_status_column_name(ai_column,
+                                                  status_column_name,
+                                                  name_buf,
+                                                  sizeof(name_buf))) {
+        status_column = get_column_schema(status_column_name);
+      }
+    }
+  }
+  return status_column;
+}
+
 ObColumnSchemaV2 *ObTableSchema::get_column_schema(const ObString &column_name)
 {
   return get_column_schema_by_name_internal(column_name);
