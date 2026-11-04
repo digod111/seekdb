@@ -1101,6 +1101,20 @@ public:
   const ObColumnSchemaV2 *get_column_schema_by_idx(const int64_t idx) const;
 
   const ObColumnSchemaV2 *get_fulltext_column(const ColumnReferenceSet &column_set) const;
+  // Hidden status column of an AI column, look up by id first then by name
+  // (`__ai_status_<column_name>`). Returns NULL if the AI column has no status column.
+  const ObColumnSchemaV2 *get_ai_status_column(const ObColumnSchemaV2 &ai_column) const;
+  int get_ai_status_column_name(const ObColumnSchemaV2 &ai_column,
+                                common::ObString &name,
+                                char *buf,
+                                const int64_t buf_len) const;
+  static bool is_ai_status_column_name(const common::ObString &column_name)
+  {
+    static const char *AI_STATUS_COLUMN_PREFIX = "__ai_status_";
+    const int64_t prefix_len = static_cast<int64_t>(strlen(AI_STATUS_COLUMN_PREFIX));
+    return column_name.length() > prefix_len
+        && 0 == strncasecmp(column_name.ptr(), AI_STATUS_COLUMN_PREFIX, prefix_len);
+  }
   ObColumnSchemaV2 *get_column_schema(const uint64_t column_id);
   ObColumnSchemaV2 *get_column_schema(const char *column_name);
   ObColumnSchemaV2 *get_column_schema(const common::ObString &column_name);

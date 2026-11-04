@@ -35,6 +35,7 @@
 #include "observer/ob_req_time_service.h"
 #include "observer/omt/ob_ai_service.h"
 #include "observer/ai_service/ob_ai_service_executor.h"
+#include "observer/ai_column/ob_ai_column_worker.h"
 #include "observer/dbms_scheduler/ob_dbms_sched_service.h"
 #include "storage/lob/ob_lob_manager.h"
 #include "storage/compaction/ob_freeze_info_mgr.h"
@@ -912,6 +913,12 @@ void ObServer::destroy()
   // Cause ObBackupInfo to lock the mutex that has been destroyed by itself, and finally trigger the core
   // This is essentially an implementation problem of repeated destruction of ObBackupInfo (or one of its members). ObServer also adds a layer of defense here.
   FLOG_INFO("[OBSERVER_NOTICE] destroy observer begin");
+  if (observer::ai_column_worker().is_inited()) {
+    observer::ai_column_worker().stop();
+    observer::ai_column_worker().wait();
+    observer::ai_column_worker().destroy();
+    FLOG_INFO("ai column worker destroyed");
+  }
   if (sql::ddl_slice_store() == this) {
     sql::register_ddl_slice_store(nullptr);
   }
@@ -1334,6 +1341,18 @@ int ObServer::start()
     if (OB_SUCC(ret) && OB_FAIL(standby_module_->start_listener())) {
       LOG_ERROR("fail to start standby gRPC service", KR(ret));
     }
+
+  // Start the AI COLUMN background worker. Rows marked PENDING by DML are
+  // computed asynchronously and written back by this worker.
+  if (OB_SUCC(ret) && !need_bootstrap_) {
+    if (OB_FAIL(observer::ai_column_worker().init(GCTX.sql_proxy_, &schema_service_))) {
+      LOG_WARN("fail to init ai column worker", KR(ret));
+    } else if (OB_FAIL(observer::ai_column_worker().start())) {
+      LOG_WARN("fail to start ai column worker", KR(ret));
+    } else {
+      FLOG_INFO("success to start ai column worker");
+    }
+  }
 
   int64_t start_service_time = ObTimeUtility::current_time();
   if (OB_FAIL(ret)) {

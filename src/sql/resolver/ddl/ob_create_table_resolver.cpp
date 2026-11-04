@@ -896,6 +896,44 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       }
     }
 
+    // For each AI column, append a hidden column that keeps its ai status.
+    if (OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule) {
+      ObSEArray<uint64_t, 4> ai_column_ids;
+      for (int64_t i = 0; OB_SUCC(ret) && i < table_schema.get_column_count(); ++i) {
+        const ObColumnSchemaV2 *col = table_schema.get_column_schema_by_idx(i);
+        if (OB_ISNULL(col)) {
+          ret = OB_ERR_UNEXPECTED;
+          SQL_RESV_LOG(WARN, "column schema is null", K(ret));
+        } else if (col->is_ai_column() && OB_INVALID_ID == col->get_ai_status_column_id()) {
+          if (OB_FAIL(ai_column_ids.push_back(col->get_column_id()))) {
+            SQL_RESV_LOG(WARN, "fail to push ai column id", K(ret));
+          }
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < ai_column_ids.count(); ++i) {
+        const ObColumnSchemaV2 *ai_col = table_schema.get_column_schema(ai_column_ids.at(i));
+        ObColumnSchemaV2 status_col;
+        uint64_t status_column_id = OB_INVALID_ID;
+        if (OB_ISNULL(ai_col)) {
+          ret = OB_ERR_UNEXPECTED;
+          SQL_RESV_LOG(WARN, "ai column schema is null", K(ret));
+        } else if (OB_FALSE_IT(status_column_id = gen_column_id())) {
+        } else if (OB_FAIL(build_ai_status_column(*ai_col, status_column_id, status_col))) {
+          SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
+        } else if (OB_FAIL(table_schema.add_column(status_col))) {
+          SQL_RESV_LOG(WARN, "fail to add ai status column", K(ret));
+        } else if (OB_ISNULL(ai_col = table_schema.get_column_schema(ai_column_ids.at(i)))) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FALSE_IT(ai_col->set_ai_status_column_id(status_column_id))) {
+        } else {
+          ObColumnNameHashWrapper name_key(status_col.get_column_name_str());
+          if (OB_FAIL(column_name_set_.set_refactored(name_key))) {
+            SQL_RESV_LOG(WARN, "fail to record ai status column name", K(ret));
+          }
+        }
+      }
+    }
+
     // A table must have at least one column as a visible column
     if (OB_SUCC(ret)) {
       // RESOLVE_NON_COL == resolve_rule when, only parse non-column definitions

@@ -13904,6 +13904,33 @@ static const _error _error_OB_AI_FUNC_MODEL_EXISTS = {
       .str_error             = "This ai model is already exists",
       .str_user_error        = "This ai model \'%.*s\' is already exists"
 };
+static const _error _error_OB_ERR_AI_COLUMN_NOT_READY = {
+      .error_name            = "OB_ERR_AI_COLUMN_NOT_READY",
+      .error_cause           = "Internal Error",
+      .error_solution        = "Contact OceanBase Support",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "AI column has unfinished tasks",
+      .str_user_error        = "AI column has unfinished tasks for table_id=%ld, column_id=%ld"
+};
+static const _error _error_OB_ERR_AI_COLUMN_INVALID_DEF = {
+      .error_name            = "OB_ERR_AI_COLUMN_INVALID_DEF",
+      .error_cause           = "Internal Error",
+      .error_solution        = "Contact OceanBase Support",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "Invalid AI column definition",
+      .str_user_error        = "%.*s"
+};
+static const _error _error_OB_ERR_AI_COLUMN_ASSIGN_FORBID = {
+      .error_name            = "OB_ERR_AI_COLUMN_ASSIGN_FORBID",
+      .error_cause           = "Internal Error",
+      .error_solution        = "Contact OceanBase Support",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "Cannot assign AI column directly",
+      .str_user_error        = "Cannot assign value to AI column \'%.*s\' directly"
+};
 static const _error _error_OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN = {
       .error_name            = "OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN",
       .error_cause           = "Internal Error",
@@ -15497,6 +15524,9 @@ struct ObStrErrorInit
     _errors[-OB_AI_FUNC_PARAM_TYPE_INVALID] = &_error_OB_AI_FUNC_PARAM_TYPE_INVALID;
     _errors[-OB_AI_FUNC_MODEL_NOT_FOUND] = &_error_OB_AI_FUNC_MODEL_NOT_FOUND;
     _errors[-OB_AI_FUNC_MODEL_EXISTS] = &_error_OB_AI_FUNC_MODEL_EXISTS;
+    _errors[-OB_ERR_AI_COLUMN_NOT_READY] = &_error_OB_ERR_AI_COLUMN_NOT_READY;
+    _errors[-OB_ERR_AI_COLUMN_INVALID_DEF] = &_error_OB_ERR_AI_COLUMN_INVALID_DEF;
+    _errors[-OB_ERR_AI_COLUMN_ASSIGN_FORBID] = &_error_OB_ERR_AI_COLUMN_ASSIGN_FORBID;
     _errors[-OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN] = &_error_OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN;
     _errors[-OB_ERR_UPDATE_TWICE] = &_error_OB_ERR_UPDATE_TWICE;
     _errors[-OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE] = &_error_OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE;

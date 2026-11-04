@@ -77,11 +77,17 @@ int ObColumnSchemaV2::assign(const ObColumnSchemaV2 &src_schema)
     sub_type_ = src_schema.sub_type_;
     skip_index_attr_ = src_schema.skip_index_attr_;
     lob_chunk_size_ = src_schema.lob_chunk_size_;
+    ai_meta_.enable_ = src_schema.ai_meta_.enable_;
+    ai_meta_.max_retries_ = src_schema.ai_meta_.max_retries_;
+    ai_meta_.status_col_id_ = src_schema.ai_meta_.status_col_id_;
 
     if (OB_FAIL(deep_copy_obj(src_schema.orig_default_value_, orig_default_value_))) {
     } else if (OB_FAIL(deep_copy_obj(src_schema.cur_default_value_, cur_default_value_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.column_name_, column_name_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.comment_, comment_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_meta_.model_name_, ai_meta_.model_name_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_meta_.expr_text_, ai_meta_.expr_text_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_meta_.sync_mode_, ai_meta_.sync_mode_))) {
     } else if (OB_FAIL(set_extended_type_info(src_schema.extended_type_info_))) {
     } else if (src_schema.column_ref_idxs_ != NULL) {
       if (OB_FAIL(alloc_column_ref_set())) {
@@ -112,6 +118,24 @@ bool ObColumnSchemaV2::operator !=(const ObColumnSchemaV2 &r) const
   return !(*this == r);
 }
 
+int ObColumnSchemaV2::set_ai_column_meta(const common::ObString &expr_text,
+                                         const common::ObString &model_name,
+                                         const common::ObString &sync_mode,
+                                         const int64_t max_retries)
+{
+  int ret = OB_SUCCESS;
+  ai_meta_.enable_ = true;
+  ai_meta_.max_retries_ = max_retries;
+  if (OB_FAIL(deep_copy_str(expr_text, ai_meta_.expr_text_))) {
+    LOG_WARN("fail to copy ai expr text", K(ret));
+  } else if (OB_FAIL(deep_copy_str(model_name, ai_meta_.model_name_))) {
+    LOG_WARN("fail to copy ai model name", K(ret));
+  } else if (OB_FAIL(deep_copy_str(sync_mode, ai_meta_.sync_mode_))) {
+    LOG_WARN("fail to copy ai sync mode", K(ret));
+  }
+  return ret;
+}
+
 int64_t ObColumnSchemaV2::get_convert_size() const
 {
   int64_t convert_size = sizeof(*this);
@@ -120,6 +144,9 @@ int64_t ObColumnSchemaV2::get_convert_size() const
   convert_size += cur_default_value_.get_deep_copy_size();
   convert_size += column_name_.length() + 1;
   convert_size += comment_.length() + 1;
+  convert_size += ai_meta_.model_name_.length() + 1;
+  convert_size += ai_meta_.expr_text_.length() + 1;
+  convert_size += ai_meta_.sync_mode_.length() + 1;
   if (column_ref_idxs_ != NULL) {
     convert_size += sizeof(ColumnReferenceSet);
   }
@@ -188,6 +215,7 @@ void ObColumnSchemaV2::reset()
   skip_index_attr_.reset();
   lob_chunk_size_ = OB_DEFAULT_LOB_CHUNK_SIZE;
   local_session_vars_.reset();
+  ai_meta_.reset();
   ObSchema::reset();
 }
 
@@ -235,7 +263,13 @@ OB_DEF_SERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_,
+                ai_meta_.enable_,
+                ai_meta_.model_name_,
+                ai_meta_.expr_text_,
+                ai_meta_.sync_mode_,
+                ai_meta_.max_retries_,
+                ai_meta_.status_col_id_);
   }
 
   return ret;
@@ -297,6 +331,23 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
                 lob_chunk_size_,
                 local_session_vars_);
   }
+  if (OB_SUCC(ret)) {
+    ObString ai_model;
+    ObString ai_expr;
+    ObString ai_sync;
+    ai_meta_.reset();
+    LST_DO_CODE(OB_UNIS_DECODE,
+                ai_meta_.enable_,
+                ai_model,
+                ai_expr,
+                ai_sync,
+                ai_meta_.max_retries_,
+                ai_meta_.status_col_id_);
+    if (OB_FAIL(deep_copy_str(ai_model, ai_meta_.model_name_))) {
+    } else if (OB_FAIL(deep_copy_str(ai_expr, ai_meta_.expr_text_))) {
+    } else if (OB_FAIL(deep_copy_str(ai_sync, ai_meta_.sync_mode_))) {
+    } else {/*do nothing*/}
+  }
   return ret;
 }
 
@@ -340,7 +391,13 @@ OB_DEF_SERIALIZE_SIZE(ObColumnSchemaV2)
               sub_type_,
               skip_index_attr_,
               lob_chunk_size_,
-              local_session_vars_);
+              local_session_vars_,
+              ai_meta_.enable_,
+              ai_meta_.model_name_,
+              ai_meta_.expr_text_,
+              ai_meta_.sync_mode_,
+              ai_meta_.max_retries_,
+              ai_meta_.status_col_id_);
   return len;
 }
 
