@@ -3544,6 +3544,9 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
     if (OB_UNLIKELY(GEN_COLUMN_DEFINITION_NUM_CHILD == node->num_child_)) {
     // generated column with pos_column
       pos_node = node->children_[5];
+    } else if (OB_UNLIKELY(AI_COLUMN_DEFINITION_NUM_CHILD == node->num_child_)) {
+      // ai column with pos_column
+      pos_node = node->children_[4];
     } else {
       // normal column with pos_column
       pos_node = node->children_[3];
@@ -3551,6 +3554,22 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
     if (NULL != pos_node) {
       if (OB_FAIL(resolve_pos_column(pos_node, column))) {
       }
+    }
+  }
+  // AI COLUMN: make sure the hidden status column exists
+  if (OB_SUCC(ret) && column.is_ai_column()) {
+    ObColumnSchemaV2 status_col;
+    AlterColumnSchema alter_status_col;
+    if (OB_FAIL(ObDDLResolver::build_ai_status_column(column, OB_INVALID_ID, status_col))) {
+      SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
+    } else if (OB_NOT_NULL(table_schema_) &&
+               OB_NOT_NULL(table_schema_->get_column_schema(status_col.get_column_name_str()))) {
+      // status column already exists, nothing to do
+    } else if (OB_FAIL(alter_status_col.assign(status_col))) {
+      SQL_RESV_LOG(WARN, "fail to assign ai status column", K(ret));
+    } else if (OB_FALSE_IT(alter_status_col.alter_type_ = OB_DDL_ADD_COLUMN)) {
+    } else if (OB_FAIL(alter_table_stmt->add_column(alter_status_col))) {
+      SQL_RESV_LOG(WARN, "fail to add ai status column", K(ret));
     }
   }
   return ret;

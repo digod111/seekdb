@@ -1850,6 +1850,15 @@ stmt::StmtType ObResolverUtils::get_stmt_type_by_item_type(const ObItemType item
         type = stmt::T_CALL_PROCEDURE;
       }
       break;
+      // AI COLUMN statements are rewritten into SELECT / UPDATE
+      case T_SHOW_AI_COLUMNS: {
+        type = stmt::T_SELECT;
+      }
+      break;
+      case T_AI_COLUMN_RETRY: {
+        type = stmt::T_UPDATE;
+      }
+      break;
       default: {
         type = stmt::T_NONE;
       }

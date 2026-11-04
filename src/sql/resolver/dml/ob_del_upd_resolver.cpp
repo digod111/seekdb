@@ -34,6 +34,31 @@ using namespace pl;
 namespace sql
 {
 
+static bool ai_dep_is_ident_char(const char c)
+{
+  return isalnum(static_cast<unsigned char>(c)) || '_' == c || '$' == c;
+}
+
+// Whether `expr` refers to the column `column_name` as an identifier.
+static bool ai_expr_references_column(const ObString &expr, const ObString &column_name)
+{
+  bool found = false;
+  if (!expr.empty() && !column_name.empty() && column_name.length() <= expr.length()) {
+    for (int64_t i = 0; !found && i + column_name.length() <= expr.length(); ++i) {
+      if (0 != strncasecmp(expr.ptr() + i, column_name.ptr(), column_name.length())) {
+        continue;
+      }
+      const int64_t end = i + column_name.length();
+      const bool left_ok = (0 == i) || !ai_dep_is_ident_char(expr[i - 1]);
+      const bool right_ok = (end >= expr.length()) || !ai_dep_is_ident_char(expr[end]);
+      if (left_ok && right_ok) {
+        found = true;
+      }
+    }
+  }
+  return found;
+}
+
 int ObTableAssignment::expand_expr(ObRawExprFactory &expr_factory,
                                    const ObIArray<ObAssignment> &assigns,
                                    ObRawExpr *&expr)
@@ -106,6 +131,11 @@ int ObDelUpdResolver::resolve_assignments(const ParseNode &parse_node,
           LOG_USER_ERROR(OB_ERR_NON_UPDATABLE_TABLE,
                          table_name.length(), table_name.ptr(),
                          scope_name.length(), scope_name.ptr());
+        }
+        if (OB_SUCC(ret) && table->is_basic_table()) {
+          if (OB_FAIL(check_ai_column_assign_forbidden(*table, *ref_expr, value_list.at(i)))) {
+            LOG_WARN("fail to check ai column assignment", K(ret));
+          }
         }
         if (OB_SUCC(ret) && (table->is_generated_table() || table->is_temp_table())) {
           if (NULL == table->view_base_item_) {
@@ -532,6 +562,7 @@ int ObDelUpdResolver::resolve_additional_assignments(ObIArray<ObTableAssignment>
         } else if (OB_FAIL(check_need_assignment(assigns.at(i).assignments_,
                                                  table_item->table_id_,
                                                  trigger_exist,
+                                                 *table_schema,
                                                  *column_schema,
                                                  need_assigned))) {
         } else if (FALSE_IT(need_assigned = need_assigned || 
@@ -562,6 +593,23 @@ int ObDelUpdResolver::resolve_additional_assignments(ObIArray<ObTableAssignment>
               if (OB_FAIL(copy_schema_expr(*params_.expr_factory_,
                                            col_item->expr_->get_dependant_expr(),
                                            assignment.expr_))) {
+              }
+            } else if (column_schema->is_ai_column()) {
+              // The cached AI value is invalid now, reset it to NULL. The background
+              // worker will recompute it once the row is marked as PENDING.
+              if (OB_FAIL(ObRawExprUtils::build_null_expr(*params_.expr_factory_,
+                                                           assignment.expr_))) {
+                LOG_WARN("fail to build null expr for ai column", K(ret));
+              }
+            } else if (ObTableSchema::is_ai_status_column_name(
+                         column_schema->get_column_name_str())) {
+              // Dependent columns changed, mark the AI value as PENDING.
+              if (OB_FAIL(ObRawExprUtils::build_const_string_expr(*params_.expr_factory_,
+                                                                  ObVarcharType,
+                                                                  ObString::make_string("P"),
+                                                                  CS_TYPE_UTF8MB4_BIN,
+                                                                  assignment.expr_))) {
+                LOG_WARN("fail to build pending status expr", K(ret));
               }
             } else if (trigger_exist) {
               assignment.expr_ = col_item->expr_;
@@ -700,9 +748,63 @@ int ObDelUpdResolver::add_assignment(common::ObIArray<ObTableAssignment> &assign
   return ret;
 }
 
+// The async worker writes an AI result column with a statement of the form
+//   UPDATE t SET ai_col = (AI_COMPLETE(...)) WHERE ...
+// so an assignment whose right hand side is computed by an AI function is the
+// internal write back path and must be allowed.
+static bool ai_column_value_from_ai_func(const ObRawExpr *expr)
+{
+  bool found = false;
+  if (NULL != expr) {
+    if (T_FUN_SYS_AI_COMPLETE == expr->get_expr_type()
+        || T_FUN_SYS_AI_EMBED == expr->get_expr_type()
+        || T_FUN_SYS_AI_RERANK == expr->get_expr_type()
+        || T_FUN_SYS_AI_PROMPT == expr->get_expr_type()) {
+      found = true;
+    }
+    for (int64_t i = 0; !found && i < expr->get_param_count(); ++i) {
+      found = ai_column_value_from_ai_func(expr->get_param_expr(i));
+    }
+  }
+  return found;
+}
+
+int ObDelUpdResolver::check_ai_column_assign_forbidden(const TableItem &table,
+                                                       const ObColumnRefRawExpr &ref_expr,
+                                                       const ObRawExpr *value_expr)
+{
+  int ret = OB_SUCCESS;
+  const ObTableSchema *table_schema = NULL;
+  const ObColumnSchemaV2 *column_schema = NULL;
+  int64_t is_worker = 0;
+  if (OB_ISNULL(schema_checker_) || OB_ISNULL(session_info_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(session_info_->get_sys_variable(SYS_VAR_AI_COLUMN_WORKER, is_worker))) {
+    LOG_WARN("fail to get ai column worker sys var", K(ret));
+  } else if (0 != is_worker) {
+    // the background worker is allowed to write AI result columns
+  } else if (ai_column_value_from_ai_func(value_expr)) {
+    // the value is produced by an AI function, i.e. the worker write back path
+  } else if (OB_FAIL(schema_checker_->get_table_schema(table.ref_id_, table_schema))) {
+    LOG_WARN("fail to get table schema", K(ret), K(table.ref_id_));
+  } else if (OB_ISNULL(table_schema)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_ISNULL(column_schema = table_schema->get_column_schema(ref_expr.get_column_id()))) {
+    // do nothing
+  } else if (column_schema->is_ai_column()) {
+    ret = OB_ERR_AI_COLUMN_ASSIGN_FORBID;
+    LOG_USER_ERROR(OB_ERR_AI_COLUMN_ASSIGN_FORBID,
+                   column_schema->get_column_name_str().length(),
+                   column_schema->get_column_name());
+    LOG_WARN("ai column can not be assigned directly", K(ret), KPC(column_schema));
+  }
+  return ret;
+}
+
 int ObDelUpdResolver::check_need_assignment(const common::ObIArray<ObAssignment> &assigns,
                                             uint64_t table_id,
                                             bool before_update_row_trigger_exist,
+                                            const ObTableSchema &table_schema,
                                             const ObColumnSchemaV2 &column,
                                             bool &need_assign)
 {
@@ -726,6 +828,43 @@ int ObDelUpdResolver::check_need_assignment(const common::ObIArray<ObAssignment>
         //the generated column isn't assigned, but the cascaded columns have been assigned
         //so assign the generated column
         need_assign = true;
+      }
+    }
+  } else if (column.is_ai_column()
+             || ObTableSchema::is_ai_status_column_name(column.get_column_name_str())) {
+    // An AI column (and its hidden status column) is invalidated when any column
+    // referenced by the AI expression is assigned. Unrelated updates do nothing.
+    const ObColumnSchemaV2 *ai_column = NULL;
+    if (column.is_ai_column()) {
+      ai_column = &column;
+    } else {
+      for (ObTableSchema::const_column_iterator iter = table_schema.column_begin();
+           OB_SUCC(ret) && NULL == ai_column && iter != table_schema.column_end(); ++iter) {
+        const ObColumnSchemaV2 *cand = *iter;
+        const ObColumnSchemaV2 *status_column = NULL;
+        if (OB_ISNULL(cand)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (!cand->is_ai_column()) {
+          // do nothing
+        } else if (OB_ISNULL(status_column = table_schema.get_ai_status_column(*cand))) {
+          // do nothing
+        } else if (status_column->get_column_id() == column.get_column_id()) {
+          ai_column = cand;
+        }
+      }
+    }
+    if (OB_SUCC(ret) && NULL != ai_column) {
+      const ObString &expr_text = ai_column->get_ai_meta().expr_text_;
+      for (int64_t i = 0; OB_SUCC(ret) && !need_assign && i < assigns.count(); ++i) {
+        const ObAssignment &assignment = assigns.at(i);
+        const ObColumnRefRawExpr *lhs = assignment.column_expr_;
+        if (assignment.table_id_ != table_id || OB_ISNULL(lhs)) {
+          // do nothing
+        } else if (lhs->get_column_id() == column.get_column_id()) {
+          // do nothing, an AI column can not be assigned by the user
+        } else if (ai_expr_references_column(expr_text, lhs->get_column_name())) {
+          need_assign = true;
+        }
       }
     }
   } else if (column.is_on_update_current_timestamp() || before_update_row_trigger_exist) {
@@ -2171,6 +2310,9 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
         ret = OB_NOT_SUPPORTED;
         LOG_USER_ERROR(OB_NOT_SUPPORTED, "specify __sess_create_time value");
       } else if (OB_FAIL(mock_values_column_ref(column_expr))) {
+      } else if (table_item->is_basic_table()
+                 && OB_FAIL(check_ai_column_assign_forbidden(*table_item, *column_expr))) {
+        report_user_error_msg(ret, ref_expr, column_ref);
       }
     }//end for
   } else {
