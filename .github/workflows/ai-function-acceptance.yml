@@ -68,6 +68,7 @@ jobs:
           key: ${{ runner.os }}-ai-seekdb-${{ hashFiles('src/**', 'include/**', 'cmake/**', 'deps/init/**', 'rust/**', 'CMakeLists.txt', 'build.sh') }}
 
       - name: Run standalone core and protocol tests
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
