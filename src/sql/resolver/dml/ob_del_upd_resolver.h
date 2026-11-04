@@ -79,9 +79,13 @@ protected:
                              const TableItem *table_item,
                              const ColumnItem *col_item,
                              ObAssignment &assign);
+  int check_ai_column_assign_forbidden(const TableItem &table,
+                                       const ObColumnRefRawExpr &ref_expr,
+                                       const ObRawExpr *value_expr = NULL);
   int check_need_assignment(const common::ObIArray<ObAssignment> &assigns,
                             uint64_t table_id,
                             bool before_update_row_trigger_exist,
+                            const share::schema::ObTableSchema &table_schema,
                             const share::schema::ObColumnSchemaV2 &column,
                             bool &need_assign);
 

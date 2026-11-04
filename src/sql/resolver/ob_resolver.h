@@ -47,6 +47,12 @@ private:
 
   template <typename SelectResolverType>
   int select_stmt_resolver_func(ObResolverParams &params, const ParseNode &parse_tree, ObStmt *&stmt);
+
+  // Parse and resolve an internally generated SQL text (used by AI COLUMN
+  // statements such as SHOW AI COLUMNS and RETRY AI COLUMN).
+  int resolve_generated_sql(const common::ObString &sql, ObStmt *&stmt);
+  int resolve_show_ai_columns(const ParseNode &parse_tree, ObStmt *&stmt);
+  int resolve_ai_column_retry(const ParseNode &parse_tree, ObStmt *&stmt);
 private:
   // data members
   ObResolverParams params_;
