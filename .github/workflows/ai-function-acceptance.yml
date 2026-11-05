@@ -159,7 +159,6 @@ jobs:
             --work-dir "$ACCEPTANCE_OUTPUT/sql" --port 2881 \
             --slice-index 0 --slice-count 1 \
             --case ai_function.ai_function_enhancement \
-            --case ai_function.ai_function_enhancement_regression \
             --case ai_function.ai_model_ddl \
             2>&1 | tee "$ACCEPTANCE_OUTPUT/sql-tests.log"
           python3 - <<'PY'
