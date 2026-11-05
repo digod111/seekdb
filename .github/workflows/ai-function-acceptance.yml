@@ -163,6 +163,26 @@ jobs:
             else
               echo "strace not available"
             fi
+            echo "=== pthread interposer build ==="
+            echo 'I2RlZmluZSBfR05VX1NPVVJDRQojaW5jbHVkZSA8cHRocmVhZC5oPgojaW5jbHVkZSA8c3RkaW8uaD4KI2luY2x1ZGUgPGRsZmNuLmg+CiNpbmNsdWRlIDxzdHJpbmcuaD4KI2luY2x1ZGUgPHN0ZGRlZi5oPgoKdHlwZWRlZiBpbnQgKCpwY190KShwdGhyZWFkX3QgKiwgY29uc3QgcHRocmVhZF9hdHRyX3QgKiwgdm9pZCAqKCopKHZvaWQgKiksIHZvaWQgKik7CnR5cGVkZWYgaW50ICgqc2FzX3QpKHB0aHJlYWRfYXR0cl90ICosIHZvaWQgKiwgc2l6ZV90KTsKdHlwZWRlZiBpbnQgKCpzc3NfdCkocHRocmVhZF9hdHRyX3QgKiwgc2l6ZV90KTsKCmludCBwdGhyZWFkX2NyZWF0ZShwdGhyZWFkX3QgKnQsIGNvbnN0IHB0aHJlYWRfYXR0cl90ICphLCB2b2lkICooKmYpKHZvaWQgKiksIHZvaWQgKmFyZykgewogIHN0YXRpYyBwY190IHJlYWwgPSBOVUxMOwogIGlmICghcmVhbCkgcmVhbCA9IChwY190KWRsc3ltKFJUTERfTkVYVCwgInB0aHJlYWRfY3JlYXRlIik7CiAgaW50IHIgPSByZWFsKHQsIGEsIGYsIGFyZyk7CiAgaWYgKHIgIT0gMCkgewogICAgZnByaW50ZihzdGRlcnIsICJbU0hJTV0gcHRocmVhZF9jcmVhdGUgRkFJTEVEIHI9JWQgJXNcbiIsIHIsIHN0cmVycm9yKHIpKTsKICB9IGVsc2UgewogICAgZnByaW50ZihzdGRlcnIsICJbU0hJTV0gcHRocmVhZF9jcmVhdGUgb2sgdGlkPSVsdVxuIiwgKHVuc2lnbmVkIGxvbmcpKnQpOwogIH0KICBmZmx1c2goc3RkZXJyKTsKICByZXR1cm4gcjsKfQoKaW50IHB0aHJlYWRfYXR0cl9zZXRzdGFjayhwdGhyZWFkX2F0dHJfdCAqYSwgdm9pZCAqYWRkciwgc2l6ZV90IHNpemUpIHsKICBzdGF0aWMgc2FzX3QgcmVhbCA9IE5VTEw7CiAgaWYgKCFyZWFsKSByZWFsID0gKHNhc190KWRsc3ltKFJUTERfTkVYVCwgInB0aHJlYWRfYXR0cl9zZXRzdGFjayIpOwogIGludCByID0gcmVhbChhLCBhZGRyLCBzaXplKTsKICBpZiAociAhPSAwKSB7CiAgICBmcHJpbnRmKHN0ZGVyciwgIltTSElNXSBwdGhyZWFkX2F0dHJfc2V0c3RhY2sgRkFJTEVEIHI9JWQgJXMgYWRkcj0lcCBzaXplPSV6dVxuIiwgciwgc3RyZXJyb3IociksIGFkZHIsIHNpemUpOwogICAgZmZsdXNoKHN0ZGVycik7CiAgfQogIHJldHVybiByOwp9CgppbnQgcHRocmVhZF9hdHRyX3NldHN0YWNrc2l6ZShwdGhyZWFkX2F0dHJfdCAqYSwgc2l6ZV90IHNpemUpIHsKICBzdGF0aWMgc3NzX3QgcmVhbCA9IE5VTEw7CiAgaWYgKCFyZWFsKSByZWFsID0gKHNzc190KWRsc3ltKFJUTERfTkVYVCwgInB0aHJlYWRfYXR0cl9zZXRzdGFja3NpemUiKTsKICBpbnQgciA9IHJlYWwoYSwgc2l6ZSk7CiAgaWYgKHIgIT0gMCkgewogICAgZnByaW50ZihzdGRlcnIsICJbU0hJTV0gcHRocmVhZF9hdHRyX3NldHN0YWNrc2l6ZSBGQUlMRUQgcj0lZCAlcyBzaXplPSV6dVxuIiwgciwgc3RyZXJyb3IociksIHNpemUpOwogICAgZmZsdXNoKHN0ZGVycik7CiAgfQogIHJldHVybiByOwp9Cg==' | base64 -d > "$RUNNER_TEMP/shim.c"
+            gcc -shared -fPIC -O1 -o "$RUNNER_TEMP/shim.so" "$RUNNER_TEMP/shim.c" -ldl               && echo "shim built" || echo "shim build failed"
+            echo "=== run with pthread interposer ==="
+            rm -rf "$RUNNER_TEMP/diag3"
+            mkdir -p "$RUNNER_TEMP/diag3"
+            LD_PRELOAD="$RUNNER_TEMP/shim.so" timeout -s KILL 40               ./build_release/src/observer/seekdb               --base-dir="$RUNNER_TEMP/diag3" --port=2892 --nodaemon               > "$RUNNER_TEMP/ob_shim.txt" 2>&1
+            echo "shim run exit: $?"
+            grep -E "SHIM|Starting seekdb|exit code" "$RUNNER_TEMP/ob_shim.txt" | tail -40 || true
+            echo "--- shim run full tail ---"
+            tail -40 "$RUNNER_TEMP/ob_shim.txt"
+            echo "--- shim run seekdb.log ---"
+            tail -20 "$RUNNER_TEMP/diag3/log/seekdb.log" 2>/dev/null || true
+            echo "=== run with 8MB stack ulimit ==="
+            rm -rf "$RUNNER_TEMP/diag4"
+            mkdir -p "$RUNNER_TEMP/diag4"
+            ( ulimit -s 8192; LD_PRELOAD="$RUNNER_TEMP/shim.so" timeout -s KILL 30               ./build_release/src/observer/seekdb               --base-dir="$RUNNER_TEMP/diag4" --port=2893 --nodaemon )               > "$RUNNER_TEMP/ob_u8.txt" 2>&1
+            echo "8MB-stack run exit: $?"
+            grep -E "SHIM|Starting seekdb" "$RUNNER_TEMP/ob_u8.txt" | tail -20 || true
+            tail -20 "$RUNNER_TEMP/diag4/log/seekdb.log" 2>/dev/null || true
             echo "=== done ==="
           } 2>&1 | tee "$ACCEPTANCE_OUTPUT/diagnose.log"
 
