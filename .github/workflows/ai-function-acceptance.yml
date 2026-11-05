@@ -128,6 +128,8 @@ jobs:
           {
             echo "=== ulimit ==="
             ulimit -a
+            echo "=== threads-max ==="
+            cat /proc/sys/kernel/threads-max 2>/dev/null || true
             echo "=== pids.max ==="
             cat /sys/fs/cgroup/pids.max 2>/dev/null || true
             echo "=== memory ==="
@@ -135,9 +137,33 @@ jobs:
             echo "=== foreground start (nodaemon, 40s) ==="
             rm -rf "$RUNNER_TEMP/diag_instance"
             mkdir -p "$RUNNER_TEMP/diag_instance"
+            set +e
             timeout -s KILL 40 ./build_release/src/observer/seekdb \
-              --base-dir="$RUNNER_TEMP/diag_instance" --port=2890 --nodaemon 2>&1 | head -200
-            echo "=== exit code: ${PIPESTATUS[0]} ==="
+              --base-dir="$RUNNER_TEMP/diag_instance" --port=2890 --nodaemon \
+              > "$RUNNER_TEMP/ob_stdout.txt" 2>&1
+            echo "=== seekdb exit code: $? ==="
+            head -100 "$RUNNER_TEMP/ob_stdout.txt"
+            echo "=== log dir ==="
+            ls -la "$RUNNER_TEMP/diag_instance/log" 2>/dev/null || true
+            for f in "$RUNNER_TEMP/diag_instance/log"/*.log; do
+              echo "--- $f ---"
+              tail -30 "$f" 2>/dev/null || true
+            done
+            echo "=== strace clone/clone3 ==="
+            if command -v strace >/dev/null 2>&1; then
+              rm -rf "$RUNNER_TEMP/diag2"
+              mkdir -p "$RUNNER_TEMP/diag2"
+              timeout -s KILL 20 strace -f -e trace=clone,clone3,mmap,mprotect \
+                -o "$RUNNER_TEMP/st.txt" \
+                ./build_release/src/observer/seekdb \
+                --base-dir="$RUNNER_TEMP/diag2" --port=2891 --nodaemon \
+                > /dev/null 2>&1
+              echo "strace wrapper exit: $?"
+              grep -E "clone|EAGAIN|EPERM|ENOMEM|EINVAL" "$RUNNER_TEMP/st.txt" | tail -30 || true
+            else
+              echo "strace not available"
+            fi
+            echo "=== done ==="
           } 2>&1 | tee "$ACCEPTANCE_OUTPUT/diagnose.log"
 
       - name: Run official AI acceptance and model DDL regression
