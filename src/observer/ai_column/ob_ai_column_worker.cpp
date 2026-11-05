@@ -225,7 +225,7 @@ int ObAIColumnWorker::process_tables()
     if (OB_FAIL(guard.get_table_schema(table_ids.at(i), table))) {
       LOG_WARN("fail to get table schema", K(ret), "table_id", table_ids.at(i));
       ret = OB_SUCCESS; // ignore this table
-    } else if (OB_ISNULL(table) || table->is_sys_table() || table->is_index_tid()) {
+    } else if (OB_ISNULL(table) || table->is_sys_table() || table->is_index_table()) {
       // do nothing
     } else if (OB_FAIL(guard.get_database_schema(table->get_database_id(), db_schema))) {
       LOG_WARN("fail to get database schema", K(ret));
@@ -375,7 +375,7 @@ int ObAIColumnWorker::process_one_row(const ObTableSchema &table,
     } else if (OB_FAIL(update.append(" = ("))) {
     } else if (OB_FAIL(update.append(ai_column.get_ai_meta().expr_text_))) {
     } else if (OB_FAIL(update.append(") WHERE "))) {
-    } else if (OB_FAIL(update.append(rowkey_pred))) {
+    } else if (OB_FAIL(update.append(rowkey_pred.ptr(), rowkey_pred.length()))) {
     } else {
       int tmp_ret = execute_write(update.string());
       if (OB_SUCCESS == tmp_ret) {
@@ -400,7 +400,7 @@ int ObAIColumnWorker::process_one_row(const ObTableSchema &table,
         }
         if (OB_FAIL(ret)) {
         } else if (OB_FAIL(fail_update.append(" WHERE "))) {
-        } else if (OB_FAIL(fail_update.append(rowkey_pred))) {
+        } else if (OB_FAIL(fail_update.append(rowkey_pred.ptr(), rowkey_pred.length()))) {
         } else if (OB_FAIL(fail_update.append(" AND "))) {
         } else if (OB_FAIL(append_quoted_ident(fail_update, status_name))) {
         } else if (OB_FAIL(fail_update.append(" = "))) {

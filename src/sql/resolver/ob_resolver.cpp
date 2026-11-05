@@ -628,7 +628,7 @@ int ObResolver::resolve_ai_column_retry(const ParseNode &parse_tree, ObStmt *&st
                                                       db_name,
                                                       table_name))) {
     LOG_WARN("fail to get relation name", K(ret));
-  } else if (db_name.empty() && OB_FAIL(params_.session_info_->get_database_name(db_name))) {
+  } else if (db_name.empty() && OB_FALSE_IT(db_name = params_.session_info_->get_database_name())) {
     LOG_WARN("fail to get current database", K(ret));
   } else {
     const ParseNode *column_name_node = column_ref->children_[2];
