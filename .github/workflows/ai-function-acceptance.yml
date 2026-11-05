@@ -120,6 +120,26 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
+      - name: Diagnose seekdb startup in foreground
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "=== ulimit ==="
+            ulimit -a
+            echo "=== pids.max ==="
+            cat /sys/fs/cgroup/pids.max 2>/dev/null || true
+            echo "=== memory ==="
+            free -h
+            echo "=== foreground start (nodaemon, 40s) ==="
+            rm -rf "$RUNNER_TEMP/diag_instance"
+            mkdir -p "$RUNNER_TEMP/diag_instance"
+            timeout -s KILL 40 ./build_release/src/observer/seekdb \
+              --base-dir="$RUNNER_TEMP/diag_instance" --port=2890 --nodaemon 2>&1 | head -200
+            echo "=== exit code: ${PIPESTATUS[0]} ==="
+          } 2>&1 | tee "$ACCEPTANCE_OUTPUT/diagnose.log"
+
       - name: Run official AI acceptance and model DDL regression
         shell: bash
         run: |
@@ -159,19 +179,35 @@ jobs:
             --work-dir "$ACCEPTANCE_OUTPUT/sql" --port 2881 \
             --slice-index 0 --slice-count 1 \
             --case ai_function.ai_function_enhancement \
+            --case ai_function.ai_prompt \
             --case ai_function.ai_model_ddl \
+            --case ai_function.ai_model_endpoint_ddl \
+            --case file_sql.file_sql_basic \
+            --case ai_column.ai_column_ddl \
+            --case ai_column.ai_column_t1_dml \
+            --case ai_column.ai_column_retry_strict \
+            --case ai_column.ai_column_vector_index \
+            --case ai_column.ai_column_worker \
             2>&1 | tee "$ACCEPTANCE_OUTPUT/sql-tests.log"
           python3 - <<'PY'
           import json, os
           from pathlib import Path
           result = json.loads((Path(os.environ['ACCEPTANCE_OUTPUT']) / 'sql/seekdb_result.json').read_text())
           expected = {'ai_function.ai_function_enhancement',
-                      'ai_function.ai_model_ddl'}
+                      'ai_function.ai_prompt',
+                      'ai_function.ai_model_ddl',
+                      'ai_function.ai_model_endpoint_ddl',
+                      'file_sql.file_sql_basic',
+                      'ai_column.ai_column_ddl',
+                      'ai_column.ai_column_t1_dml',
+                      'ai_column.ai_column_retry_strict',
+                      'ai_column.ai_column_vector_index',
+                      'ai_column.ai_column_worker'}
           assert result['success'], result
           assert result['case_count'] == len(expected), result
           assert set(result['cases']) == expected, result
           assert not result['failed_cases'], result
-          print('::notice title=AI acceptance stage::All three selected SQL cases passed')
+          print('::notice title=AI acceptance stage::All official AI/file_sql SQL cases passed')
           PY
           python3 - <<'PY'
           import json
