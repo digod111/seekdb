@@ -54,7 +54,7 @@ static const char *file_col_type_str(const common::ObObjMeta &meta)
     case ObDateType:
       ret = "DATE";
       break;
-    case ObDatetimeType:
+    case ObDateTimeType:
       ret = "DATETIME";
       break;
     default:

@@ -73,7 +73,7 @@ FSValueType fs_meta_to_fs_type(const ObObjMeta &meta)
     case ObIntType: return FS_BIGINT;
     case ObDoubleType: return FS_DOUBLE;
     case ObDateType: return FS_DATE;
-    case ObDatetimeType: return FS_DATETIME;
+    case ObDateTimeType: return FS_DATETIME;
     default: return FS_VARCHAR;
   }
 }

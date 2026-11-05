@@ -22,6 +22,7 @@
 #include "common/json_type/ob_json_tree.h"
 #include "lib/allocator/ob_allocator.h"
 #include "lib/utility/ob_macro_utils.h"
+#include "lib/ob_check_macros.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -174,7 +175,7 @@ void fs_type_to_ob_meta(FSValueType vtype, ObObjMeta &meta, ObAccuracy &accuracy
       ob_type = ObDateType;
       break;
     case FS_DATETIME:
-      ob_type = ObDatetimeType;
+      ob_type = ObDateTimeType;
       break;
     case FS_VARCHAR:
     case FS_NULL:
@@ -209,7 +210,7 @@ int fs_scalar_to_obj(FSValueType col_type,
         int64_t n = len < static_cast<int64_t>(sizeof(tmp)) ? len : static_cast<int64_t>(sizeof(tmp)) - 1;
         MEMCPY(tmp, ptr, n);
         tmp[n] = '\0';
-        obj.set_int(FS_STRTOLL(tmp, NULL));
+        obj.set_int(FS_STRTOLL(tmp, NULL, 10));
         break;
       }
       case FS_DOUBLE: {
@@ -350,8 +351,10 @@ struct InferCtx
   {
     int ret = OB_SUCCESS;
     ObFileTableCol &c = cols_->at(idx);
-    FSValueType b = FS_NULL, i64 = FS_NULL, d = FS_NULL;
-    FSValueType v = fs_classify_scalar(ptr, len, b, i64, d);
+    bool out_bool = false;
+    int64_t out_i = 0;
+    double out_d = 0;
+    FSValueType v = fs_classify_scalar(ptr, static_cast<int32_t>(len), out_bool, out_i, out_d);
     if (FS_NULL == v) {
       c.has_null_ = true;
     } else {
@@ -368,7 +371,7 @@ struct InferCtx
       case ObIntType: return FS_BIGINT;
       case ObDoubleType: return FS_DOUBLE;
       case ObDateType: return FS_DATE;
-      case ObDatetimeType: return FS_DATETIME;
+      case ObDateTimeType: return FS_DATETIME;
       default: return FS_VARCHAR;
     }
   }
