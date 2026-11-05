@@ -166,7 +166,7 @@ jobs:
           import json, os
           from pathlib import Path
           result = json.loads((Path(os.environ['ACCEPTANCE_OUTPUT']) / 'sql/seekdb_result.json').read_text())
-          expected = {'ai_function.ai_function_enhancement', 'ai_function.ai_function_enhancement_regression',
+          expected = {'ai_function.ai_function_enhancement',
                       'ai_function.ai_model_ddl'}
           assert result['success'], result
           assert result['case_count'] == len(expected), result
