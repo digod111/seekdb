@@ -216,7 +216,7 @@ int ObAIColumnWorker::process_tables()
     ret = OB_NOT_INIT;
   } else if (OB_FAIL(schema_service_->get_runtime_schema_guard(guard))) {
     LOG_WARN("fail to get schema guard", K(ret));
-  } else if (OB_FAIL(guard.get_table_ids_in_tenant(table_ids))) {
+  } else if (OB_FAIL(guard.get_table_ids_in_runtime(table_ids))) {
     LOG_WARN("fail to get table ids", K(ret));
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < table_ids.count(); ++i) {
