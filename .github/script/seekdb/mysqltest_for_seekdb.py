@@ -473,6 +473,20 @@ def write_json(path, payload):
     os.replace(str(temporary), str(path))
 
 
+def select_cases(cases, requested):
+    if not cases:
+        raise RunnerError("no mysqltest cases selected")
+    if not requested:
+        return cases
+    if len(requested) != len(set(requested)):
+        raise RunnerError("duplicate --case names")
+    available = {case.name: case for case in cases}
+    unknown = sorted(set(requested) - set(available))
+    if unknown:
+        raise RunnerError("unknown or excluded mysqltest cases: {}".format(", ".join(unknown)))
+    return [available[name] for name in requested]
+
+
 def command_run(args):
     repo_root = Path(__file__).resolve().parents[3]
     deploy_dir = repo_root / "tools" / "deploy"
@@ -490,8 +504,10 @@ def command_run(args):
     args.work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        all_cases = discover_cases(repo_root)
+        all_cases = select_cases(discover_cases(repo_root), args.cases)
         selected_cases = all_cases[args.slice_index :: args.slice_count]
+        if not selected_cases:
+            raise RunnerError("selected mysqltest slice contains no cases")
         prepare_instance(args, repo_root, sdb_script, deploy_dir)
         tmp_dir = args.work_dir / "tmp"
         log_dir = args.work_dir / "mysqltest_log"
@@ -578,7 +594,7 @@ def command_merge(args):
     executed_cases = []
 
     try:
-        expected_cases = [case.name for case in discover_cases(repo_root)]
+        expected_cases = [case.name for case in select_cases(discover_cases(repo_root), args.cases)]
     except RunnerError as exc:
         expected_cases = []
         errors.append(str(exc))
@@ -671,6 +687,8 @@ def create_parser():
     run.add_argument("--port", type=positive_int, default=2881)
     run.add_argument("--slice-index", type=non_negative_int, required=True)
     run.add_argument("--slice-count", type=positive_int, required=True)
+    run.add_argument("--case", dest="cases", action="append", default=[],
+                     help="exact case name; repeat to run a focused selection")
     run.set_defaults(handler=command_run)
 
     merge = subparsers.add_parser("merge", help="merge mysqltest slice results")
@@ -678,6 +696,8 @@ def create_parser():
     merge.add_argument("--slice-count", type=positive_int, required=True)
     merge.add_argument("--run-id", default="0")
     merge.add_argument("--output", required=True)
+    merge.add_argument("--case", dest="cases", action="append", default=[],
+                       help="same exact case selection used for the slices")
     merge.set_defaults(handler=command_merge)
 
     return parser
