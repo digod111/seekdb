@@ -207,6 +207,15 @@ jobs:
           set -euo pipefail
           export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"
           export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost"
+          echo "=== prepare local sshd for file_sql mysqltest ==="
+          sudo apt-get install -y openssh-server >/dev/null 2>&1 || true
+          sudo mkdir -p /run/sshd
+          sudo service ssh start || sudo /usr/sbin/sshd || true
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          ssh -o StrictHostKeyChecking=accept-new 127.0.0.1 true && echo "ssh ok"
           python3 -B unittest/sql/engine/expr/ai_mock_service.py --port 8000 \
             > "$ACCEPTANCE_OUTPUT/mock.log" 2>&1 &
           mock_pid=$!
