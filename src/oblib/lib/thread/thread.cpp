@@ -24,6 +24,8 @@
 #endif
 #include <io.h>
 #include <process.h>
+#else
+#include <unistd.h>
 #endif
 #include "lib/utility/ob_platform_utils.h"  // Platform compatibility layer
 #include "lib/rc/context.h"
@@ -121,6 +123,30 @@ int Thread::start()
     if (pret == 0) {
       stop_ = false;
       pret = pthread_create(&pth_, &attr, __th_start, this);
+#if !defined(_WIN32)
+      if (0 != pret) {
+        // Some environments reject threads created with a user-provided stack.
+        // Fall back to a system-allocated stack instead of failing the caller.
+        int explicit_stack_pret = pret;
+        pthread_attr_t fallback_attr;
+        const long page_size = sysconf(_SC_PAGESIZE);
+        LOG_ERROR("pthread create with explicit stack failed, retry with system stack",
+                  K(explicit_stack_pret), K(errno));
+        if (page_size > 0 && 0 == pthread_attr_init(&fallback_attr)) {
+          const int64_t aligned_size =
+              ((stack_size_ + page_size - 1) / page_size) * page_size;
+          pthread_attr_setstacksize(&fallback_attr, static_cast<size_t>(aligned_size));
+          pret = pthread_create(&pth_, &fallback_attr, __th_start, this);
+          pthread_attr_destroy(&fallback_attr);
+        }
+        if (0 != pret) {
+          int sized_stack_pret = pret;
+          pret = pthread_create(&pth_, NULL, __th_start, this);
+          LOG_ERROR("pthread create with system stack failed",
+                    K(explicit_stack_pret), K(sized_stack_pret), K(pret), K(errno));
+        }
+      }
+#endif
       if (pret != 0) {
         LOG_ERROR("pthread create failed", K(pret), K(errno));
 #ifdef _WIN32
