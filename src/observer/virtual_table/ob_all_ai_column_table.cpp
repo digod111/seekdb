@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SERVER
 
 #include "observer/virtual_table/ob_all_ai_column_table.h"
+#include "common/object/ob_obj_type.h"
 #include "lib/allocator/page_arena.h"
 #include "lib/string/ob_sql_string.h"
 #include "share/schema/ob_multi_version_schema_service.h"
@@ -209,10 +210,7 @@ int ObAllAIColumnTable::load_rows_()
             // original ai expression
             ObSqlString normalized;
             const ObObjType dt = column->get_data_type();
-            const bool is_int_type = (ObIntType == dt || ObTinyIntType == dt
-                || ObSmallIntType == dt || ObMediumIntType == dt || ObBigIntType == dt
-                || ObUTinyIntType == dt || ObUSmallIntType == dt
-                || ObUMediumIntType == dt || ObUBigIntType == dt);
+            const bool is_int_type = ob_is_integer_type(dt);
             if (column->is_json()) {
               if (OB_FAIL(normalized.append(
                       "Return exactly one valid JSON value for the following task. "))) {
