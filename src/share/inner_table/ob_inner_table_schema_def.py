@@ -2448,29 +2448,6 @@ all_ai_model_endpoint_def = dict(
 def_table_schema(**all_ai_model_endpoint_def)
 
 
-def_table_schema(
-  owner = 'gyt.gyt',
-  table_name    = '__all_ai_column',
-  table_id      = '12700',
-  table_type = 'VIRTUAL_TABLE',
-  gm_columns    = [],
-  rowkey_columns = [
-    ('table_id', 'int'),
-    ('column_id', 'int')
-  ],
-  normal_columns = [
-    ('column_name', 'varchar:128'),
-    ('ai_model_name', 'varchar:128'),
-    ('sync_mode', 'varchar:16'),
-    ('max_retries', 'int'),
-    ('normalized_expr', 'varchar:65535'),
-    ('state_column_id', 'int'),
-    ('request_column_id', 'int'),
-    ('result_spec_column_id', 'int')
-  ]
-  )
-
-
 all_objauth_mysql_def = dict(
     owner = 'cjl476581',
     table_name     = '__all_objauth_mysql',
@@ -6408,6 +6385,29 @@ def_table_schema(
     ('fetch_scn', 'int'),
   ],
 )
+
+# 12565: __all_ai_column
+def_table_schema(
+  owner = 'gyt.gyt',
+  table_name    = '__all_ai_column',
+  table_id      = '12565',
+  table_type = 'VIRTUAL_TABLE',
+  gm_columns    = [],
+  rowkey_columns = [
+    ('table_id', 'int'),
+    ('column_id', 'int')
+  ],
+  normal_columns = [
+    ('column_name', 'varchar:128'),
+    ('ai_model_name', 'varchar:128'),
+    ('sync_mode', 'varchar:16'),
+    ('max_retries', 'int'),
+    ('normalized_expr', 'varchar:65535'),
+    ('state_column_id', 'int'),
+    ('request_column_id', 'int'),
+    ('result_spec_column_id', 'int')
+  ]
+  )
 
 # Reserved position (placeholder before this line)
 # Placeholder suggestion for this section: Use actual table names for placeholders
