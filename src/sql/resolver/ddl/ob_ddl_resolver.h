@@ -530,6 +530,16 @@ protected:
   static int build_ai_status_column(const share::schema::ObColumnSchemaV2 &ai_column,
                                     const uint64_t status_column_id,
                                     share::schema::ObColumnSchemaV2 &status_column);
+  // Build a generic hidden AI bookkeeping column named `<prefix><column_name>`.
+  static int build_ai_hidden_column(const share::schema::ObColumnSchemaV2 &ai_column,
+                                    const char *prefix,
+                                    const uint64_t column_id,
+                                    share::schema::ObColumnSchemaV2 &hidden_column);
+  // Build the 3 hidden columns of one AI column, in order: status (state),
+  // request, result spec. Column ids are start_column_id, +1, +2.
+  static int build_ai_column_hidden_columns(const share::schema::ObColumnSchemaV2 &ai_column,
+                                            const uint64_t start_column_id,
+                                            common::ObIArray<share::schema::ObColumnSchemaV2> &hidden_columns);
   static bool is_ai_status_column_name(const common::ObString &column_name);
   int drop_not_null_constraint(const share::schema::ObColumnSchemaV2 &column);
   int resolve_normal_column_attribute_constr_not_null(ObColumnSchemaV2 &column,

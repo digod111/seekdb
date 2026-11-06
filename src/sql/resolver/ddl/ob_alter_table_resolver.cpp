@@ -3556,20 +3556,28 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
       }
     }
   }
-  // AI COLUMN: make sure the hidden status column exists
+  // AI COLUMN: make sure the 3 hidden bookkeeping columns exist
+  // (status / request / result spec)
   if (OB_SUCC(ret) && column.is_ai_column()) {
-    ObColumnSchemaV2 status_col;
-    AlterColumnSchema alter_status_col;
-    if (OB_FAIL(ObDDLResolver::build_ai_status_column(column, OB_INVALID_ID, status_col))) {
-      SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
-    } else if (OB_NOT_NULL(table_schema_) &&
-               OB_NOT_NULL(table_schema_->get_column_schema(status_col.get_column_name_str()))) {
-      // status column already exists, nothing to do
-    } else if (OB_FAIL(alter_status_col.assign(status_col))) {
-      SQL_RESV_LOG(WARN, "fail to assign ai status column", K(ret));
-    } else if (OB_FALSE_IT(alter_status_col.alter_type_ = OB_DDL_ADD_COLUMN)) {
-    } else if (OB_FAIL(alter_table_stmt->add_column(alter_status_col))) {
-      SQL_RESV_LOG(WARN, "fail to add ai status column", K(ret));
+    ObSEArray<ObColumnSchemaV2, 3> hidden_cols;
+    const uint64_t start_column_id = OB_INVALID_ID;
+    if (OB_FAIL(ObDDLResolver::build_ai_column_hidden_columns(column,
+                                                              start_column_id,
+                                                              hidden_cols))) {
+      SQL_RESV_LOG(WARN, "fail to build ai column hidden columns", K(ret));
+    } else {
+      for (int64_t j = 0; OB_SUCC(ret) && j < hidden_cols.count(); ++j) {
+        AlterColumnSchema alter_hidden_col;
+        if (OB_NOT_NULL(table_schema_) &&
+            OB_NOT_NULL(table_schema_->get_column_schema(hidden_cols.at(j).get_column_name_str()))) {
+          // hidden column already exists, nothing to do
+        } else if (OB_FAIL(alter_hidden_col.assign(hidden_cols.at(j)))) {
+          SQL_RESV_LOG(WARN, "fail to assign ai hidden column", K(ret));
+        } else if (OB_FALSE_IT(alter_hidden_col.alter_type_ = OB_DDL_ADD_COLUMN)) {
+        } else if (OB_FAIL(alter_table_stmt->add_column(alter_hidden_col))) {
+          SQL_RESV_LOG(WARN, "fail to add ai hidden column", K(ret));
+        }
+      }
     }
   }
   return ret;

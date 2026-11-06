@@ -100,6 +100,7 @@
 #include "observer/virtual_table/ob_all_virtual_table_mgr.h"
 #include "observer/virtual_table/ob_all_virtual_px_worker_stat.h"
 #include "observer/virtual_table/ob_all_virtual_tablet_store_stat.h"
+#include "observer/virtual_table/ob_all_ai_column_table.h"
 #include "observer/virtual_table/ob_all_virtual_server_schema_info.h"
 #include "observer/virtual_table/ob_all_virtual_memory_context_stat.h"
 #include "observer/virtual_table/ob_all_virtual_dump_info.h"
@@ -1248,6 +1249,17 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
               } else {
                 vt_iter = static_cast<ObVirtualTableIterator *>(part_table_store_stat);
               }
+            }
+            break;
+          }
+          case OB_ALL_AI_COLUMN_TID: {
+            ObAllAIColumnTable *ai_column_table = NULL;
+            share::schema::ObMultiVersionSchemaService &schema_service =
+                                                          local_management_service_.get_schema_service();
+            if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllAIColumnTable,
+                                          ai_column_table, schema_service))) {
+            } else {
+              vt_iter = static_cast<ObVirtualTableIterator *>(ai_column_table);
             }
             break;
           }

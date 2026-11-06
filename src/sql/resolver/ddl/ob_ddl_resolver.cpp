@@ -2209,6 +2209,73 @@ int ObDDLResolver::resolve_ai_column_definition(ObColumnSchemaV2 &column,
     }
   }
 
+  // 5. AI_EMBED with an explicit dimension argument must match the vector
+  //    column dimension: `emb vector(4) AI COLUMN (AI_EMBED('m', content, 3))`
+  //    must fail at DDL time with OB_ERR_INVALID_VECTOR_DIM (7600).
+  if (OB_SUCC(ret) && column.get_meta_type().is_collection_sql_type()) {
+    // locate the function name prefix of the expr text
+    int64_t name_end = 0;
+    while (name_end < expr_text.length()
+           && (isalnum(static_cast<unsigned char>(expr_text[name_end])) || '_' == expr_text[name_end])) {
+      ++name_end;
+    }
+    const ObString func_name(static_cast<int32_t>(name_end), expr_text.ptr());
+    if (ai_column_name_equal_case_insensitive(func_name, "AI_EMBED")) {
+      // find the last top-level argument: scan backwards from the closing paren
+      int64_t last_comma = -1;
+      int64_t depth = 0;
+      bool in_string = false;
+      for (int64_t i = expr_text.length() - 2; i >= 0; --i) {
+        const char c = expr_text[i];
+        if (in_string) {
+          if ('\'' == c) {
+            in_string = false;
+          }
+        } else if ('\'' == c) {
+          in_string = true;
+        } else if (')' == c) {
+          ++depth;
+        } else if ('(' == c) {
+          --depth;
+        } else if (0 == depth && ',' == c) {
+          last_comma = i;
+          break;
+        }
+      }
+      if (last_comma > 0) {
+        ObString last_arg(static_cast<int32_t>(expr_text.length() - last_comma - 2),
+                          expr_text.ptr() + last_comma + 1); // drop ',' and ')'
+        last_arg = last_arg.trim();
+        bool all_digits = last_arg.length() > 0;
+        for (int64_t i = 0; all_digits && i < last_arg.length(); ++i) {
+          if (!isdigit(static_cast<unsigned char>(last_arg[i]))) {
+            all_digits = false;
+          }
+        }
+        if (all_digits) {
+          int64_t expr_dim = 0;
+          char dim_buf[32];
+          int64_t copy_len = min(last_arg.length(), static_cast<int64_t>(sizeof(dim_buf) - 1));
+          MEMCPY(dim_buf, last_arg.ptr(), copy_len);
+          dim_buf[copy_len] = '\0';
+          expr_dim = strtoll(dim_buf, NULL, 10);
+          int64_t column_dim = 0;
+          if (OB_FAIL(ObVectorIndexUtil::get_vector_dim_from_extend_type_info(
+                  column.get_extended_type_info(), column_dim))) {
+            SQL_RESV_LOG(WARN, "fail to get vector dim of ai column", K(ret));
+          } else if (column_dim > 0 && expr_dim != column_dim) {
+            ret = OB_ERR_INVALID_VECTOR_DIM;
+            LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM,
+                           static_cast<uint32_t>(column_dim),
+                           static_cast<uint32_t>(expr_dim));
+            SQL_RESV_LOG(WARN, "ai embed dim does not match vector column dim", K(ret),
+                         K(column_dim), K(expr_dim));
+          }
+        }
+      }
+    }
+  }
+
   if (OB_SUCC(ret)) {
     if (OB_FAIL(column.set_ai_column_meta(expr_text, model_name, sync_mode, max_retries))) {
       SQL_RESV_LOG(WARN, "fail to set ai column meta", K(ret));
@@ -2272,6 +2339,101 @@ bool ObDDLResolver::is_ai_status_column_name(const ObString &column_name)
 {
   return column_name.length() > static_cast<int64_t>(strlen("__ai_status_"))
       && 0 == strncasecmp(column_name.ptr(), "__ai_status_", strlen("__ai_status_"));
+}
+
+int ObDDLResolver::build_ai_hidden_column(const ObColumnSchemaV2 &ai_column,
+                                          const char *prefix,
+                                          const uint64_t column_id,
+                                          ObColumnSchemaV2 &hidden_column)
+{
+  int ret = OB_SUCCESS;
+  char name_buf[OB_MAX_COLUMN_NAME_LENGTH + 1];
+  const int64_t prefix_len = static_cast<int64_t>(strlen(prefix));
+  ObString ai_col_name = ai_column.get_column_name_str();
+  int64_t name_len = prefix_len + ai_col_name.length();
+  if (name_len > OB_MAX_COLUMN_NAME_LENGTH) {
+    name_len = OB_MAX_COLUMN_NAME_LENGTH;
+  }
+  MEMSET(name_buf, 0, sizeof(name_buf));
+  MEMCPY(name_buf, prefix, prefix_len);
+  const int64_t copy_len = name_len - prefix_len;
+  if (copy_len > 0) {
+    MEMCPY(name_buf + prefix_len, ai_col_name.ptr(), copy_len);
+  }
+  hidden_column.reset();
+  ObObjMeta meta;
+  meta.set_varchar();
+  meta.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  meta.set_collation_level(CS_LEVEL_IMPLICIT);
+  hidden_column.set_column_id(column_id);
+  hidden_column.set_meta_type(meta);
+  hidden_column.set_data_type(ObVarcharType);
+  hidden_column.set_accuracy(ObAccuracy(4096));
+  hidden_column.set_charset_type(CHARSET_UTF8MB4);
+  hidden_column.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  hidden_column.set_nullable(true);
+  hidden_column.set_is_hidden(true);
+  hidden_column.set_rowkey_position(0);
+  if (OB_FAIL(hidden_column.set_column_name(ObString(name_len, name_buf)))) {
+    SQL_RESV_LOG(WARN, "fail to set ai hidden column name", K(ret));
+  } else if (OB_FAIL(hidden_column.set_comment("internal ai column metadata"))) {
+    SQL_RESV_LOG(WARN, "fail to set ai hidden column comment", K(ret));
+  }
+  return ret;
+}
+
+int ObDDLResolver::build_ai_status_column(const ObColumnSchemaV2 &ai_column,
+                                          const uint64_t status_column_id,
+                                          ObColumnSchemaV2 &status_column)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(build_ai_hidden_column(ai_column, "__ai_status_", status_column_id, status_column))) {
+    SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
+  } else {
+    // A new row starts as PENDING: the background worker picks it up and computes
+    // the AI value. 'R' means ready, 'F' means failed.
+    ObObj default_value;
+    default_value.set_varchar(ObString::make_string("P"));
+    default_value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+    default_value.set_collation_level(CS_LEVEL_IMPLICIT);
+    status_column.set_accuracy(ObAccuracy(64));
+    if (OB_FAIL(status_column.set_cur_default_value(default_value, false))) {
+      SQL_RESV_LOG(WARN, "fail to set ai status column default", K(ret));
+    } else if (OB_FAIL(status_column.set_orig_default_value(default_value))) {
+      SQL_RESV_LOG(WARN, "fail to set ai status column origin default", K(ret));
+    }
+  }
+  return ret;
+}
+
+int ObDDLResolver::build_ai_column_hidden_columns(const ObColumnSchemaV2 &ai_column,
+                                                  const uint64_t start_column_id,
+                                                  ObIArray<ObColumnSchemaV2> &hidden_columns)
+{
+  int ret = OB_SUCCESS;
+  ObColumnSchemaV2 status_col;
+  ObColumnSchemaV2 request_col;
+  ObColumnSchemaV2 result_spec_col;
+  const uint64_t request_column_id = OB_INVALID_ID == start_column_id
+      ? OB_INVALID_ID : start_column_id + 1;
+  const uint64_t result_spec_column_id = OB_INVALID_ID == start_column_id
+      ? OB_INVALID_ID : start_column_id + 2;
+  if (OB_FAIL(build_ai_status_column(ai_column, start_column_id, status_col))) {
+    SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
+  } else if (OB_FAIL(build_ai_hidden_column(ai_column, "__ai_request_",
+                                            request_column_id, request_col))) {
+    SQL_RESV_LOG(WARN, "fail to build ai request column", K(ret));
+  } else if (OB_FAIL(build_ai_hidden_column(ai_column, "__ai_result_spec_",
+                                            result_spec_column_id, result_spec_col))) {
+    SQL_RESV_LOG(WARN, "fail to build ai result spec column", K(ret));
+  } else if (OB_FAIL(hidden_columns.push_back(status_col))) {
+    SQL_RESV_LOG(WARN, "fail to add ai status column", K(ret));
+  } else if (OB_FAIL(hidden_columns.push_back(request_col))) {
+    SQL_RESV_LOG(WARN, "fail to add ai request column", K(ret));
+  } else if (OB_FAIL(hidden_columns.push_back(result_spec_col))) {
+    SQL_RESV_LOG(WARN, "fail to add ai result spec column", K(ret));
+  }
+  return ret;
 }
 
 int ObDDLResolver::resolve_normal_column_attribute_constr_not_null(ObColumnSchemaV2 &column,

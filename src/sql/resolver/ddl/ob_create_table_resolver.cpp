@@ -896,7 +896,8 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       }
     }
 
-    // For each AI column, append a hidden column that keeps its ai status.
+    // For each AI column, append its 3 hidden bookkeeping columns
+    // (status / request / result spec).
     if (OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule) {
       ObSEArray<uint64_t, 4> ai_column_ids;
       for (int64_t i = 0; OB_SUCC(ret) && i < table_schema.get_column_count(); ++i) {
@@ -913,23 +914,27 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       for (int64_t i = 0; OB_SUCC(ret) && i < ai_column_ids.count(); ++i) {
         const ObColumnSchemaV2 *ai_col = table_schema.get_column_schema(ai_column_ids.at(i));
         ObColumnSchemaV2 *ai_col_mut = NULL;
-        ObColumnSchemaV2 status_col;
-        uint64_t status_column_id = OB_INVALID_ID;
+        ObSEArray<ObColumnSchemaV2, 3> hidden_cols;
+        uint64_t start_column_id = OB_INVALID_ID;
         if (OB_ISNULL(ai_col)) {
           ret = OB_ERR_UNEXPECTED;
           SQL_RESV_LOG(WARN, "ai column schema is null", K(ret));
-        } else if (OB_FALSE_IT(status_column_id = gen_column_id())) {
-        } else if (OB_FAIL(build_ai_status_column(*ai_col, status_column_id, status_col))) {
-          SQL_RESV_LOG(WARN, "fail to build ai status column", K(ret));
-        } else if (OB_FAIL(table_schema.add_column(status_col))) {
-          SQL_RESV_LOG(WARN, "fail to add ai status column", K(ret));
+        } else if (OB_FALSE_IT(start_column_id = gen_column_id())) {
+        } else if (OB_FAIL(build_ai_column_hidden_columns(*ai_col, start_column_id, hidden_cols))) {
+          SQL_RESV_LOG(WARN, "fail to build ai column hidden columns", K(ret));
         } else if (OB_ISNULL(ai_col_mut = table_schema.get_column_schema(ai_column_ids.at(i)))) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FALSE_IT(ai_col_mut->set_ai_status_column_id(status_column_id))) {
+        } else if (OB_FALSE_IT(ai_col_mut->set_ai_status_column_id(start_column_id))) {
         } else {
-          ObColumnNameHashWrapper name_key(status_col.get_column_name_str());
-          if (OB_FAIL(column_name_set_.set_refactored(name_key))) {
-            SQL_RESV_LOG(WARN, "fail to record ai status column name", K(ret));
+          for (int64_t j = 0; OB_SUCC(ret) && j < hidden_cols.count(); ++j) {
+            if (OB_FAIL(table_schema.add_column(hidden_cols.at(j)))) {
+              SQL_RESV_LOG(WARN, "fail to add ai hidden column", K(ret));
+            } else {
+              ObColumnNameHashWrapper name_key(hidden_cols.at(j).get_column_name_str());
+              if (OB_FAIL(column_name_set_.set_refactored(name_key))) {
+                SQL_RESV_LOG(WARN, "fail to record ai hidden column name", K(ret));
+              }
+            }
           }
         }
       }
