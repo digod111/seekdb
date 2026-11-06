@@ -168,11 +168,13 @@ int ObAiServiceProxy::select_ai_endpoint_by_ai_model_name(ObArenaAllocator &allo
     SMART_VAR(ObMySQLProxy::MySQLResult, res) {
       ObMySQLResult *result = NULL;
       if (OB_FAIL(sql_proxy.read(res, sql.ptr()))) {
+        LOG_WARN("select ai endpoint by ai model name query failed", KR(ret), K(sql));
       } else if (NULL == (result = res.get_result())) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(result->next())) {
         if (OB_ITER_END == ret) {
           ret = OB_AI_FUNC_ENDPOINT_NOT_FOUND;
+          LOG_INFO("no endpoint row for ai model name", K(ai_model_name), K(sql));
         } else {
         }
       } else if (OB_FAIL(build_ai_endpoint_(allocator, *result, endpoint))) {
