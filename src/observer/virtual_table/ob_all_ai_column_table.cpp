@@ -17,7 +17,7 @@
 #define USING_LOG_PREFIX SERVER
 
 #include "observer/virtual_table/ob_all_ai_column_table.h"
-#include "lib/allocator/ob_arena_allocator.h"
+#include "lib/allocator/page_arena.h"
 #include "lib/string/ob_sql_string.h"
 #include "share/schema/ob_multi_version_schema_service.h"
 #include "share/schema/ob_schema_getter_guard.h"

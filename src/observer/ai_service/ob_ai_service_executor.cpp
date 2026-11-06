@@ -235,6 +235,21 @@ int ObAiServiceExecutor::read_ai_endpoint_by_ai_model_name(common::ObISQLClient 
   return ret;
 }
 
+int ObAiServiceExecutor::read_ai_endpoint_by_ai_model_name(ObArenaAllocator &allocator,
+                                                           const ObString &ai_model_name,
+                                                           ObAiModelEndpointInfo &endpoint_info)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("sql proxy is null", KR(ret));
+  } else if (OB_FAIL(read_ai_endpoint_by_ai_model_name(*GCTX.sql_proxy_, allocator,
+                                                       ai_model_name, endpoint_info))) {
+    LOG_WARN("read ai endpoint by ai model name failed", KR(ret), K(ai_model_name));
+  }
+  return ret;
+}
+
 int ObAiServiceExecutor::fetch_new_ai_model_endpoint_id(uint64_t &new_ai_model_endpoint_id)
 {
   int ret = OB_SUCCESS;

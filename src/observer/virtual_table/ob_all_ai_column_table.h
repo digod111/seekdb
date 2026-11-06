@@ -17,6 +17,9 @@
 #ifndef OCEANBASE_OBSERVER_VIRTUAL_TABLE_OB_ALL_AI_COLUMN_TABLE_
 #define OCEANBASE_OBSERVER_VIRTUAL_TABLE_OB_ALL_AI_COLUMN_TABLE_
 
+#include "lib/allocator/page_arena.h"
+#include "lib/container/ob_se_array.h"
+#include "lib/string/ob_string.h"
 #include "observer/virtual_table/ob_virtual_table_scanner_iterator.h"
 
 namespace oceanbase
@@ -38,8 +41,7 @@ namespace observer
 class ObAllAIColumnTable : public common::ObVirtualTableScannerIterator
 {
 public:
-  explicit ObAllAIColumnTable(share::schema::ObMultiVersionSchemaService &schema_service)
-      : schema_service_(schema_service), rows_(), row_idx_(0), loaded_(false) {}
+  explicit ObAllAIColumnTable(share::schema::ObMultiVersionSchemaService &schema_service);
   virtual ~ObAllAIColumnTable() {}
   virtual int inner_get_next_row(common::ObNewRow *&row) override;
   virtual void reset() override;
