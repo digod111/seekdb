@@ -2284,57 +2284,6 @@ int ObDDLResolver::resolve_ai_column_definition(ObColumnSchemaV2 &column,
   return ret;
 }
 
-int ObDDLResolver::build_ai_status_column(const ObColumnSchemaV2 &ai_column,
-                                          const uint64_t status_column_id,
-                                          ObColumnSchemaV2 &status_column)
-{
-  int ret = OB_SUCCESS;
-  char name_buf[OB_MAX_COLUMN_NAME_LENGTH + 1];
-  const char *prefix = "__ai_status_";
-  const int64_t prefix_len = static_cast<int64_t>(strlen(prefix));
-  ObString ai_col_name = ai_column.get_column_name_str();
-  int64_t name_len = prefix_len + ai_col_name.length();
-  if (name_len > OB_MAX_COLUMN_NAME_LENGTH) {
-    name_len = OB_MAX_COLUMN_NAME_LENGTH;
-  }
-  MEMSET(name_buf, 0, sizeof(name_buf));
-  MEMCPY(name_buf, prefix, prefix_len);
-  const int64_t copy_len = name_len - prefix_len;
-  if (copy_len > 0) {
-    MEMCPY(name_buf + prefix_len, ai_col_name.ptr(), copy_len);
-  }
-  status_column.reset();
-  ObObjMeta meta;
-  meta.set_varchar();
-  meta.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-  meta.set_collation_level(CS_LEVEL_IMPLICIT);
-  status_column.set_column_id(status_column_id);
-  status_column.set_meta_type(meta);
-  status_column.set_data_type(ObVarcharType);
-  status_column.set_accuracy(ObAccuracy(64));
-  status_column.set_charset_type(CHARSET_UTF8MB4);
-  status_column.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-  status_column.set_nullable(true);
-  status_column.set_is_hidden(true);
-  status_column.set_rowkey_position(0);
-  // A new row starts as PENDING: the background worker picks it up and computes
-  // the AI value. 'R' means ready, 'F' means failed.
-  ObObj default_value;
-  default_value.set_varchar(ObString::make_string("P"));
-  default_value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-  default_value.set_collation_level(CS_LEVEL_IMPLICIT);
-  if (OB_FAIL(status_column.set_column_name(ObString(name_len, name_buf)))) {
-    SQL_RESV_LOG(WARN, "fail to set ai status column name", K(ret));
-  } else if (OB_FAIL(status_column.set_comment("internal ai column status"))) {
-    SQL_RESV_LOG(WARN, "fail to set ai status column comment", K(ret));
-  } else if (OB_FAIL(status_column.set_cur_default_value(default_value, false))) {
-    SQL_RESV_LOG(WARN, "fail to set ai status column default", K(ret));
-  } else if (OB_FAIL(status_column.set_orig_default_value(default_value))) {
-    SQL_RESV_LOG(WARN, "fail to set ai status column origin default", K(ret));
-  }
-  return ret;
-}
-
 bool ObDDLResolver::is_ai_status_column_name(const ObString &column_name)
 {
   return column_name.length() > static_cast<int64_t>(strlen("__ai_status_"))
