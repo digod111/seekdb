@@ -381,23 +381,35 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
-  bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
+  // The ranges are produced by splitting the (ascending) dict key stream at first-char
+  // boundaries, and they are appended in range id order when the cache is loaded, so
+  // range_dicts_ is sorted by start_ and the ranges are pairwise disjoint. Therefore the
+  // largest range whose start_ <= single_word can be located by binary search, and it is
+  // the only range that may contain single_word (identical to the previous linear scan).
+  int64_t left = 0;
+  int64_t right = range_dicts_.size() - 1;
+  int64_t candidate = -1;
+  while (left <= right) {
+    const int64_t mid = left + ((right - left) >> 1);
     if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
+                          range_dicts_[mid].start_.get_word(),
                           single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
-      dict = range_dicts_[i].dict_;
-      found = true;
+        <= 0) {
+      candidate = mid;
+      left = mid + 1;
+    } else {
+      right = mid - 1;
     }
   }
-  if (!found) {
+  if (candidate < 0
+      || ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                           range_dicts_[candidate].end_.get_word(),
+                           single_word)
+             < 0) {
     // not found, dis match
     ret = OB_ENTRY_NOT_EXIST;
+  } else {
+    dict = range_dicts_[candidate].dict_;
   }
   return ret;
 }
